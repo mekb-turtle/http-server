@@ -65,7 +65,7 @@ char *format_bytes(size_t byte, enum format_bytes_mode mode) {
 
 	const char *suffixes = " kMGTPEZY";
 
-	if (snprintf(str, 64, "%lu%s %c%s", mantissa, frac_str_dp, suffixes[exp_index], suffix) < 0)
+	if (snprintf(str, 64, "%zu%s %c%s", mantissa, frac_str_dp, suffixes[exp_index], suffix) < 0)
 		goto snprintf_error;
 
 	if (byte == 0) {

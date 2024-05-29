@@ -5,7 +5,9 @@
 #include <stdlib.h>
 #include <errno.h>
 
+#include <dirent.h>
 #include <sys/stat.h>
+
 #include <arpa/inet.h>
 #include <cjson/cJSON.h>
 #include "format_bytes.h"
@@ -37,27 +39,12 @@ char *sockaddr_to_string(struct sockaddr *addr) {
 	return NULL;
 }
 
-enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connection,
-                                     const char *url,
-                                     const char *method, const char *version,
-                                     const char *upload_data,
-                                     size_t *upload_data_size, void **req_cls) {
-	void *data = NULL;                                                     // response data
-	enum MHD_ResponseMemoryMode data_memory_mode = MHD_RESPMEM_PERSISTENT; // what mhd should do with the data
-	size_t size;                                                           // size of the response data
-	unsigned int status = MHD_HTTP_OK;                                     // response status
-	char *content_type = NULL;                                             // response content type
-	enum output_mode {
-		OUT_NONE,
-		OUT_TEXT,
-		OUT_HTML,
-		OUT_JSON
-	} output_mode = OUT_TEXT;           // response content type enum
-	cJSON *root = cJSON_CreateObject(); // for responding with JSON data
-	char *result_file = NULL;           // used for logging
-
-	// get accept content type
-	const char *accept_type = MHD_lookup_connection_value(connection, MHD_HEADER_KIND, MHD_HTTP_HEADER_ACCEPT);
+static enum output_mode {
+	OUT_NONE,
+	OUT_TEXT,
+	OUT_HTML,
+	OUT_JSON
+} get_output_mode(const char *accept_type) {
 	if (accept_type) {
 		size_t len = strlen(accept_type);
 		if (len <= 1024) {                     // arbitrary limit
@@ -70,12 +57,99 @@ enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connecti
 			semi[0] = ',';  // trim off the semicolon and replace it with the comma
 			semi[1] = '\0'; // and null terminate
 
-			if (strstr(str, "text/html"))
-				output_mode = OUT_HTML;
+			if (strstr(str, "text/html")) return OUT_HTML;
 			else if (strstr(str, "application/json"))
-				output_mode = OUT_JSON;
+				return OUT_JSON;
 		}
 	}
+	return OUT_TEXT;
+}
+
+struct stat_opt {
+	struct stat stat;
+	DIR *dir;
+	FILE *fp;
+};
+
+void close_stat(struct stat_opt *st) {
+	if (st->dir) {
+		closedir(st->dir);
+		st->dir = NULL;
+	}
+	if (st->fp) {
+		fclose(st->fp);
+		st->fp = NULL;
+	}
+}
+
+bool stat_file(
+        char *filepath,
+        struct stat_opt *out,
+        struct httpd_data *cls) {
+start_stat_file:
+	close_stat(out);
+
+	// lstat to prevent symlink traversal
+	if (lstat(filepath, &out->stat) != 0) {
+		// file not found
+		return false;
+	}
+
+	switch (out->stat.st_mode & S_IFMT) {
+		case S_IFDIR:
+			out->dir = opendir(filepath);
+			if (!out->dir) {
+				if (!cls->quiet)
+					eprintf("Failed to open directory: %s: %s\n", filepath, strerror(errno));
+				goto no_file;
+			}
+			break;
+		case S_IFLNK:
+			if (!cls->follow_symlinks) goto no_file; // symlink not allowed
+			// follow symlink
+			char filepath_[PATH_MAX];
+			if (!realpath(filepath, filepath_)) {
+				if (!cls->quiet)
+					eprintf("Invalid symlink path: %s: %s\n", filepath_, strerror(errno));
+				goto no_file;
+			}
+			memcpy(filepath, filepath_, PATH_MAX);
+			goto start_stat_file; // repeat the check for the target
+		case S_IFREG:             // regular file
+			// TODO: caching
+			out->fp = fopen(filepath, "rb");
+			if (!out->fp) {
+				if (!cls->quiet)
+					eprintf("Failed to open file: %s: %s\n", filepath, strerror(errno));
+				goto no_file;
+			}
+			break;
+		default:
+			// unsupported file type
+			goto no_file;
+	}
+	return true;
+no_file:
+	return false;
+}
+
+enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connection,
+                                     const char *url,
+                                     const char *method, const char *version,
+                                     const char *upload_data,
+                                     size_t *upload_data_size, void **req_cls) {
+	void *data = NULL;                                                     // response data
+	enum MHD_ResponseMemoryMode data_memory_mode = MHD_RESPMEM_PERSISTENT; // what mhd should do with the data
+	size_t size;                                                           // size of the response data
+	unsigned int status = MHD_HTTP_OK;                                     // response status
+	char *content_type = NULL;                                             // response content type
+	cJSON *root = cJSON_CreateObject();                                    // for responding with JSON data
+	char *result_file = NULL;                                              // used for logging
+	bool not_found = false;
+
+	// get accept content type
+	const char *accept_type = MHD_lookup_connection_value(connection, MHD_HEADER_KIND, MHD_HTTP_HEADER_ACCEPT);
+	enum output_mode output_mode = get_output_mode(accept_type); // response content type enum
 
 	struct httpd_data *cls = (struct httpd_data *) cls_;
 
@@ -92,9 +166,10 @@ enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connecti
 
 	char filepath[PATH_MAX]; // full path to file
 	strcpy(filepath, cls->base_file);
-	const char *urlpath = url;
-	struct stat st;
+	struct stat_opt st = {.dir = NULL, .fp = NULL};
 
+	const char *urlpath = url;
+parse_url:;
 	bool first = false, is_file = false;
 
 	while (true) {
@@ -126,62 +201,67 @@ enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connecti
 		} else
 			first = true;
 
-		// resolve the file and do some checks
-
-	stat_file:
-		// lstat to prevent symlink traversal
-		if (lstat(filepath, &st) != 0) {
-			// file not found
+		// resolve the file
+		if (stat_file(filepath, &st, cls)) {
 			goto not_found;
-		}
-
-		switch (st.st_mode & S_IFMT) {
-			case S_IFDIR:
-				break;
-			case S_IFLNK:
-				if (!cls->follow_symlinks) goto not_found; // symlink not allowed
-				// follow symlink
-				char filepath_[PATH_MAX];
-				if (!realpath(filepath, filepath_)) {
-					if (!cls->quiet)
-						eprintf("Invalid symlink path: %s: %s\n", filepath_, strerror(errno));
-					goto not_found;
-				}
-				memcpy(filepath, filepath_, PATH_MAX);
-				goto stat_file; // repeat the check for the target
-			case S_IFREG:       // regular file
-				is_file = true;
-				break;
-			default:
-				// unsupported file type
-				goto not_found;
 		}
 	}
 
-	if (S_ISREG(st.st_mode)) {
+	//TODO
+	if (st.fp) {
 		result_file = filepath;
-		output_mode = OUT_TEXT;
+		output_mode = OUT_NONE;
 		data = "test";
 		size = 4;
 		goto respond;
+	} else if (st.dir) {
+		if (!cls->list_directories) goto not_found; // directory listing not allowed
+		result_file = filepath;
+		cJSON *dir_array;
+		if (output_mode == OUT_JSON) {
+			dir_array = cJSON_CreateArray();
+			cJSON_AddItemToObject(root, "children", dir_array);
+		}
+		struct dirent *entry;
+		while ((entry = readdir(st.dir))) {
+			printf("%s\n", entry->d_name);
+			//		if (entry->d_name[0] == '.') continue;
+			switch (output_mode) {
+				case OUT_NONE:
+					break;
+				case OUT_TEXT:
+					break;
+				case OUT_HTML:
+					break;
+				case OUT_JSON:
+					cJSON *dir_obj = cJSON_CreateObject();
+					cJSON_AddItemToObject(dir_array, "name", cJSON_CreateString(entry->d_name));
+					cJSON_AddItemToObject(dir_array, "", cJSON_CreateString(entry->d_name));
+					cJSON_AddItemToArray(dir_array, cJSON_CreateString(entry->d_name));
+					break;
+			}
+		}
+		close_stat(&st);
+		size = strlen(data);
+		goto respond;
 	}
-
-	if (!S_ISDIR(st.st_mode)) goto not_found; // unsupported file type
-
-	if (!cls->list_directories) goto not_found; // directory listing not allowed
-	result_file = filepath;
-	output_mode = OUT_TEXT;
-	data = "Directory listing";
-	size = strlen(data);
-	goto respond;
+	goto not_found; // unsupported file typ
 
 not_found:
+	close_stat(&st);
 	status = MHD_HTTP_NOT_FOUND;
+	if (cls->not_found_file && !not_found) {
+		// serve the not found file
+		not_found = true;
+		urlpath = cls->not_found_file;
+		goto parse_url;
+	}
 	goto respond;
 bad_request:
 	status = MHD_HTTP_BAD_REQUEST;
 	goto respond;
-respond:
+respond:;
+	if (st.dir) closedir(st.dir);
 	struct MHD_Response *response;
 
 	if (!data) { // if there is no data to respond with

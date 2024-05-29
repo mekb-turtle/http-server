@@ -53,7 +53,7 @@ endif
 all: $(BIN_DIR)/$(TARGET)
 
 $(BIN_DIR)/$(TARGET): $(OBJ_BINARY_FILES) $(OBJ_FILES) | $(BIN_DIR)
-	$(CC) $(LDFLAGS) $(LDLIBS) $^ -o $@
+	$(CC) $^ -o $@ $(LDFLAGS) $(LDLIBS)
 
 $(OBJ_BINARY_DIR)/%.o: $(SRC_BINARY_DIR)/% | $(OBJ_BINARY_DIR)
 	xxd -i $< | $(CC) $(CFLAGS) $(CPPFLAGS) -x c -c - -o $@

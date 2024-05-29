@@ -153,6 +153,7 @@ int main(int argc, char *argv[]) {
 		printf("Allow serving files starting with `.`: %s\n", data.dotfiles ? "yes" : "no");
 		printf("Follow symlinks: %s\n", data.follow_symlinks ? "yes" : "no");
 		printf("List directories: %s\n", data.list_directories ? "yes" : "no");
+		printf("\n");
 	}
 
 	// start http server
