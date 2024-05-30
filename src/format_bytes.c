@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "util.h"
+
 char *format_bytes(size_t byte, enum format_bytes_mode mode) {
 	const int scale = 2;
 
@@ -53,7 +55,7 @@ char *format_bytes(size_t byte, enum format_bytes_mode mode) {
 		return NULL;
 	}
 
-	char *frac_str_dp = strchrnul(frac_str, '.'); // find the decimal point, or "" if none found
+	char *frac_str_dp = strchrnul_(frac_str, '.'); // find the decimal point, or "" if none found
 	if (strchr(frac_str, 'e')) {
 		// use "" if float uses scientific notation
 		frac_str_dp = frac_str + strlen(frac_str);

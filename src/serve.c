@@ -10,6 +10,7 @@
 
 #include <arpa/inet.h>
 #include <cjson/cJSON.h>
+#include "util.h"
 #include "format_bytes.h"
 
 #define eprintf(...) fprintf(stderr, __VA_ARGS__)
@@ -20,7 +21,7 @@
 #define PATH_SEPARATOR '/'
 #endif
 
-char *sockaddr_to_string(struct sockaddr *addr) {
+static char *sockaddr_to_string(struct sockaddr *addr) {
 	if (addr)
 		switch (addr->sa_family) {
 			case AF_INET: {
@@ -53,7 +54,7 @@ static enum output_mode {
 			memcpy(str + 1, accept_type, len); // copy the string
 
 			str[len + 1] = '\0';
-			char *semi = strchrnul(str, ';');
+			char *semi = strchrnul_(str, ';');
 			semi[0] = ',';  // trim off the semicolon and replace it with the comma
 			semi[1] = '\0'; // and null terminate
 
@@ -71,7 +72,7 @@ struct stat_opt {
 	FILE *fp;
 };
 
-void close_stat(struct stat_opt *st) {
+static void close_stat(struct stat_opt *st) {
 	if (st->dir) {
 		closedir(st->dir);
 		st->dir = NULL;
@@ -82,10 +83,11 @@ void close_stat(struct stat_opt *st) {
 	}
 }
 
-bool stat_file(
+static bool stat_file(
         char *filepath,
         struct stat_opt *out,
-        struct httpd_data *cls) {
+        struct httpd_data *cls,
+        bool open) {
 start_stat_file:
 	close_stat(out);
 
@@ -128,6 +130,7 @@ start_stat_file:
 			// unsupported file type
 			goto no_file;
 	}
+	if (!open) close_stat(out);
 	return true;
 no_file:
 	return false;
@@ -167,9 +170,7 @@ enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connecti
 	char filepath[PATH_MAX]; // full path to file
 	strcpy(filepath, cls->base_file);
 	struct stat_opt st = {.dir = NULL, .fp = NULL};
-
 	const char *urlpath = url;
-parse_url:;
 	bool first = false, is_file = false;
 
 	while (true) {
@@ -178,8 +179,8 @@ parse_url:;
 			if (*urlpath == '\0') break;       // check for end of path
 			if (is_file) goto not_found;       // file cannot have subdirectories
 
-			const char *slash = strchrnul(urlpath, '/'); // find next slash (or end of string)
-			size_t segment_len = slash - urlpath;        // length of the path segment
+			const char *slash = strchrnul_(urlpath, '/'); // find next slash (or end of string)
+			size_t segment_len = slash - urlpath;         // length of the path segment
 			if (strncmp(urlpath, ".", segment_len) == 0) goto bad_request;
 			if (strncmp(urlpath, "..", segment_len) == 0) goto bad_request;
 
@@ -202,13 +203,12 @@ parse_url:;
 			first = true;
 
 		// resolve the file
-		if (stat_file(filepath, &st, cls)) {
-			goto not_found;
-		}
+		if (!stat_file(filepath, &st, cls, true)) goto not_found;
 	}
 
-	//TODO
+serve_file:
 	if (st.fp) {
+		//TODO
 		result_file = filepath;
 		output_mode = OUT_NONE;
 		data = "test";
@@ -222,10 +222,18 @@ parse_url:;
 			dir_array = cJSON_CreateArray();
 			cJSON_AddItemToObject(root, "children", dir_array);
 		}
+
 		struct dirent *entry;
 		while ((entry = readdir(st.dir))) {
 			printf("%s\n", entry->d_name);
-			//		if (entry->d_name[0] == '.') continue;
+			if (entry->d_name[0] == '.') {
+				if (cls->dotfiles) continue;                                       // skip dotfiles
+				if (entry->d_name[1] == '\0') continue;                            // skip "."
+				if (entry->d_name[1] == '.' && entry->d_name[2] == '\0') continue; // skip ".."
+			}
+
+			if (!stat_file(cls->not_found_file, &st, cls, false)) continue; // skip if cannot open file
+
 			switch (output_mode) {
 				case OUT_NONE:
 					break;
@@ -233,16 +241,14 @@ parse_url:;
 					break;
 				case OUT_HTML:
 					break;
-				case OUT_JSON:
+				case OUT_JSON:;
 					cJSON *dir_obj = cJSON_CreateObject();
-					cJSON_AddItemToObject(dir_array, "name", cJSON_CreateString(entry->d_name));
-					cJSON_AddItemToObject(dir_array, "", cJSON_CreateString(entry->d_name));
-					cJSON_AddItemToArray(dir_array, cJSON_CreateString(entry->d_name));
+					cJSON_AddStringToObject(dir_obj, "name", entry->d_name);
+					cJSON_AddItemToArray(dir_array, dir_obj);
 					break;
 			}
 		}
 		close_stat(&st);
-		size = strlen(data);
 		goto respond;
 	}
 	goto not_found; // unsupported file typ
@@ -251,17 +257,16 @@ not_found:
 	close_stat(&st);
 	status = MHD_HTTP_NOT_FOUND;
 	if (cls->not_found_file && !not_found) {
-		// serve the not found file
-		not_found = true;
-		urlpath = cls->not_found_file;
-		goto parse_url;
+		// resolve the file
+		if (!stat_file(cls->not_found_file, &st, cls, true)) goto not_found;
+		goto serve_file;
 	}
 	goto respond;
 bad_request:
 	status = MHD_HTTP_BAD_REQUEST;
 	goto respond;
 respond:;
-	if (st.dir) closedir(st.dir);
+	close_stat(&st);
 	struct MHD_Response *response;
 
 	if (!data) { // if there is no data to respond with
@@ -319,6 +324,7 @@ respond:;
 		        result_file ? result_file : "", result_file ? ", " : "",
 		        size_str);
 		// all in one printf call to prevent interleaving of output from multiple threads
+		free(ip);
 		free(size_str);
 	}
 	cJSON_Delete(root);

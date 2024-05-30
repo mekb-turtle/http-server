@@ -6,6 +6,7 @@
 
 struct httpd_data {
 	char *base_file;
+	char *not_found_file;
 	bool dotfiles;
 	bool follow_symlinks;
 	bool list_directories;

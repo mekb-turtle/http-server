@@ -4,6 +4,7 @@
 #include <getopt.h>
 #include <limits.h>
 #include <stdbool.h>
+#include <signal.h>
 
 #include <arpa/inet.h>
 #include <microhttpd.h>
@@ -12,7 +13,8 @@
 #define eprintf(...) fprintf(stderr, __VA_ARGS__)
 
 static struct MHD_Daemon *httpd;
-static void handle_exit(); // later in the code
+static void signal_handler(int sig); // later in the code
+static void handle_exit();
 
 static struct option options_getopt[] = {
         {"help",      no_argument,       0, 'h'},
@@ -20,8 +22,11 @@ static struct option options_getopt[] = {
         {"address",   required_argument, 0, 'a'},
         {"port",      required_argument, 0, 'p'},
         {"quiet",     no_argument,       0, 'q'},
+        {"dotfiles",  no_argument,       0, 'h'},
         {"symlink",   no_argument,       0, 's'},
         {"directory", no_argument,       0, 'd'},
+        {"notfound",  required_argument, 0, 'n'},
+        {"404",       required_argument, 0, 'n'},
         {0,           0,                 0, 0  }
 };
 
@@ -38,10 +43,10 @@ int main(int argc, char *argv[]) {
 	memset(&data, 0, sizeof(data));
 
 	// argument handling
-	while ((opt = getopt_long(argc, argv, ":hVa:p:qhsd", options_getopt, NULL)) != -1) {
+	while ((opt = getopt_long(argc, argv, ":hVa:p:qhsdn:", options_getopt, NULL)) != -1) {
 		switch (opt) {
 			case 'h':
-				printf("Usage: %s [OPTION]... [DIRECTORY/FILE]\n", TARGET);
+				printf("Usage: %s [option]... [directory/file]\n", TARGET);
 				printf("-h --help: Shows help text\n");
 				printf("-V --version: Shows the version\n");
 				printf("-a --address [address]: Set the address to listen on\n");
@@ -50,6 +55,7 @@ int main(int argc, char *argv[]) {
 				printf("-h --dotfiles: Allow serving files starting with `.`\n");
 				printf("-s --symlink: Follow symlinks\n");
 				printf("-d --directory: List directories\n");
+				printf("-n --notfound --404 [directory/file]: Set what file to serve on 404\n");
 				return 0;
 			case 'V':
 				printf("%s %s\n", TARGET, VERSION);
@@ -170,10 +176,23 @@ int main(int argc, char *argv[]) {
 
 	// wait for exit
 	atexit(handle_exit);
-	pause();
-	return 0;
+	for (int i = 0; i < NSIG; ++i) {
+		if (i == SIGKILL || i == SIGSTOP) continue;
+		signal(i, signal_handler);
+	}
+	while (true) pause();
 }
 
-void handle_exit() {
-	if (httpd) MHD_stop_daemon(httpd);
+static void signal_handler(int sig) {
+	if (sig == SIGTSTP) return;
+	printf("Caught signal %i\n", sig);
+	exit(0x80 + sig);
+}
+
+static void handle_exit() {
+	if (httpd) {
+		MHD_stop_daemon(httpd);
+		httpd = NULL;
+		printf("Stopped server...\n");
+	}
 }
