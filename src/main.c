@@ -5,6 +5,7 @@
 #include <limits.h>
 #include <stdbool.h>
 #include <signal.h>
+#include <errno.h>
 
 #include <arpa/inet.h>
 #include <microhttpd.h>
@@ -22,7 +23,7 @@ static struct option options_getopt[] = {
         {"address",   required_argument, 0, 'a'},
         {"port",      required_argument, 0, 'p'},
         {"quiet",     no_argument,       0, 'q'},
-        {"dotfiles",  no_argument,       0, 'h'},
+        {"dotfiles",  no_argument,       0, 'f'},
         {"symlink",   no_argument,       0, 's'},
         {"directory", no_argument,       0, 'd'},
         {"notfound",  required_argument, 0, 'n'},
@@ -43,7 +44,7 @@ int main(int argc, char *argv[]) {
 	memset(&data, 0, sizeof(data));
 
 	// argument handling
-	while ((opt = getopt_long(argc, argv, ":hVa:p:qhsdn:", options_getopt, NULL)) != -1) {
+	while ((opt = getopt_long(argc, argv, ":hVa:p:qfsdn:", options_getopt, NULL)) != -1) {
 		switch (opt) {
 			case 'h':
 				printf("Usage: %s [option]... [directory/file]\n", TARGET);
@@ -52,7 +53,7 @@ int main(int argc, char *argv[]) {
 				printf("-a --address [address]: Set the address to listen on\n");
 				printf("-p --port [port]: Set the port to listen on\n");
 				printf("-q --quiet: Don't output logs\n");
-				printf("-h --dotfiles: Allow serving files starting with `.`\n");
+				printf("-f --dotfiles: Allow serving files starting with `.`\n");
 				printf("-s --symlink: Follow symlinks\n");
 				printf("-d --directory: List directories\n");
 				printf("-n --notfound --404 [directory/file]: Set what file to serve on 404\n");
@@ -63,17 +64,40 @@ int main(int argc, char *argv[]) {
 			default:
 				if (!invalid) {
 					switch (opt) {
-						case 'h':
-							data.dotfiles = true;
+						case 'q':
+							if (data.quiet) invalid = true;
+							else
+								data.quiet = true;
+							break;
+						case 'f':
+							if (data.dotfiles) invalid = true;
+							else
+								data.dotfiles = true;
 							break;
 						case 's':
-							data.follow_symlinks = true;
+							if (data.follow_symlinks) invalid = true;
+							else
+								data.follow_symlinks = true;
 							break;
 						case 'd':
-							data.list_directories = true;
+							if (data.list_directories) invalid = true;
+							else
+								data.list_directories = true;
 							break;
-						case 'q':
-							data.quiet = true;
+						case 'n':
+							if (data.not_found_file) {
+								// already set
+								invalid = true;
+								break;
+							}
+							char *filename_ = optarg;
+							char filename[PATH_MAX];
+							if (!filename_) filename_ = ".";
+							if (!realpath(filename_, filename)) {
+								eprintf("404 path: %s: %s\n", filename_, strerror(errno));
+								return 1;
+							}
+							data.not_found_file = filename;
 							break;
 						case 'a':
 							if (address) {
@@ -121,7 +145,7 @@ int main(int argc, char *argv[]) {
 	char filename[PATH_MAX];
 	if (!filename_) filename_ = ".";
 	if (!realpath(filename_, filename)) {
-		eprintf("Invalid path: %s\n", filename_);
+		eprintf("Base path: %s\n", filename_);
 		return 1;
 	}
 
@@ -159,6 +183,7 @@ int main(int argc, char *argv[]) {
 		printf("Allow serving files starting with `.`: %s\n", data.dotfiles ? "yes" : "no");
 		printf("Follow symlinks: %s\n", data.follow_symlinks ? "yes" : "no");
 		printf("List directories: %s\n", data.list_directories ? "yes" : "no");
+		printf("Not found page: %s\n", data.not_found_file ? data.not_found_file : "none");
 		printf("\n");
 	}
 

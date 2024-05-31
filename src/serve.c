@@ -66,30 +66,36 @@ static enum output_mode {
 	return OUT_TEXT;
 }
 
-struct stat_opt {
+struct file_detail {
 	struct stat stat;
 	DIR *dir;
 	FILE *fp;
 };
 
-static void close_stat(struct stat_opt *st) {
-	if (st->dir) {
-		closedir(st->dir);
-		st->dir = NULL;
+static void close_file(struct file_detail *file_detail) {
+	if (file_detail->dir) {
+		closedir(file_detail->dir);
+		file_detail->dir = NULL;
 	}
-	if (st->fp) {
-		fclose(st->fp);
-		st->fp = NULL;
+	if (file_detail->fp) {
+		fclose(file_detail->fp);
+		file_detail->fp = NULL;
 	}
 }
 
-static bool stat_file(
+static bool open_file(
         char *filepath,
-        struct stat_opt *out,
+        struct file_detail *out,
         struct httpd_data *cls,
         bool open) {
+	struct file_detail st_;
+	if (!out) {
+		st_ = (struct file_detail){.dir = NULL, .fp = NULL};
+		out = &st_;
+	}
+
 start_stat_file:
-	close_stat(out);
+	close_file(out);
 
 	// lstat to prevent symlink traversal
 	if (lstat(filepath, &out->stat) != 0) {
@@ -130,10 +136,57 @@ start_stat_file:
 			// unsupported file type
 			goto no_file;
 	}
-	if (!open) close_stat(out);
+	if (!open) close_file(out);
 	return true;
 no_file:
 	return false;
+}
+
+static bool valid_filename_n(const char *name, size_t len, struct httpd_data *cls) {
+	if (len > 0 && name[0] == '.') {
+		if (!cls->dotfiles)
+			return false; // skip dotfiles
+		if (len == 1)
+			return false; // skip "."
+		else if (len == 2 && name[1] == '.')
+			return false; // skip ".."
+	}
+	for (size_t i = 0; i < len; ++i) {
+		if (name[i] == '\0') return false;
+#ifdef _WIN32
+		if (strchr("\\/:*?\"<>|", name[i])) return false;
+#endif
+	}
+	return true;
+}
+
+static bool valid_filename(const char *name, struct httpd_data *cls) {
+	return valid_filename_n(name, strlen(name), cls);
+}
+
+static bool add_cjson_item(cJSON *root, struct file_detail st, char *url_dir, char *url_name) {
+	if (url_name && url_dir) {
+		char new_url[PATH_MAX];
+		memcpy(new_url, url_dir, PATH_MAX);
+		if (!concat_char(new_url, PATH_MAX, '/')) return false;
+		if (!concat(new_url, PATH_MAX, url_name, strlen(url_name))) return false;
+		url_dir = new_url;
+	} else if (url_dir && url_dir[0] == '\0') {
+		url_dir = "/";
+	}
+	if (url_dir) cJSON_AddStringToObject(root, "url", url_dir);
+	if (url_name) cJSON_AddStringToObject(root, "name", url_name);
+	if (st.dir) {
+		cJSON_AddStringToObject(root, "type", "directory");
+	} else if (st.fp) {
+		cJSON_AddStringToObject(root, "type", "file");
+	} else {
+		return false;
+	}
+	if (st.fp) {
+		cJSON_AddNumberToObject(root, "size", st.stat.st_size);
+	}
+	return true;
 }
 
 enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connection,
@@ -163,76 +216,71 @@ enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connecti
 
 	// validate url
 	if (url[0] != '/') goto bad_request;
-#ifdef _WIN32
-	if (strpbrk(url, "\\:*?\"<>|")) goto not_found;
-#endif
 
 	char filepath[PATH_MAX]; // full path to file
 	strcpy(filepath, cls->base_file);
-	struct stat_opt st = {.dir = NULL, .fp = NULL};
-	const char *urlpath = url;
-	bool first = false, is_file = false;
 
-	while (true) {
-		if (first) {                           // allow filepath to be resolved for initial base directory
-			while (*urlpath == '/') urlpath++; // skip leading slashes
-			if (*urlpath == '\0') break;       // check for end of path
-			if (is_file) goto not_found;       // file cannot have subdirectories
+	char url_clean[PATH_MAX];
+	url_clean[0] = '\0';
 
-			const char *slash = strchrnul_(urlpath, '/'); // find next slash (or end of string)
-			size_t segment_len = slash - urlpath;         // length of the path segment
-			if (strncmp(urlpath, ".", segment_len) == 0) goto bad_request;
-			if (strncmp(urlpath, "..", segment_len) == 0) goto bad_request;
+	struct file_detail file = {.dir = NULL, .fp = NULL};
+	bool is_file = false;
 
-			if (*urlpath == '.' && cls->dotfiles) goto not_found; // dotfiles not allowed
+	if (!open_file(filepath, &file, cls, true)) goto not_found;
 
-			size_t filepath_len = strlen(filepath);
-			if (filepath_len + segment_len + 1 >= PATH_MAX) { // path too long
-				status = MHD_HTTP_URI_TOO_LONG;
-				goto respond;
-			}
+	for (const char *urlpath = url;;) {
+		bool first = urlpath == url;
 
-			// append path segment to filepath
-			filepath[filepath_len] = PATH_SEPARATOR;
-			filepath[filepath_len + 1] = '\0'; // null terminate
-			strncat(filepath, urlpath, segment_len);
+		while (*urlpath == '/') urlpath++; // skip leading slashes
+		if (*urlpath == '\0') break;       // check for end of path
+		if (is_file) goto not_found;       // file cannot have subdirectories
 
-			// skip to the next segment
-			urlpath = slash;
-		} else
-			first = true;
+		const char *slash = strchrnul_(urlpath, '/'); // find next slash (or end of string)
+		size_t segment_len = slash - urlpath;         // length of the path segment
+
+		if (!valid_filename_n(urlpath, segment_len, cls)) goto bad_request;
+
+		if (first)
+			if (!concat_char(url_clean, PATH_MAX, '/')) goto too_long;
+		if (!concat(url_clean, PATH_MAX, urlpath, segment_len)) goto too_long;
+
+		if (!concat_char(filepath, PATH_MAX, PATH_SEPARATOR)) goto too_long;
+		if (!concat(filepath, PATH_MAX, urlpath, segment_len)) goto too_long;
+
+		// skip to the next segment
+		urlpath = slash;
 
 		// resolve the file
-		if (!stat_file(filepath, &st, cls, true)) goto not_found;
+		if (!open_file(filepath, &file, cls, true)) goto not_found;
+		if (file.fp) is_file = true;
 	}
 
 serve_file:
-	if (st.fp) {
+	if (file.fp) {
 		//TODO
 		result_file = filepath;
 		output_mode = OUT_NONE;
 		data = "test";
 		size = 4;
 		goto respond;
-	} else if (st.dir) {
+	} else if (file.dir) {
 		if (!cls->list_directories) goto not_found; // directory listing not allowed
 		result_file = filepath;
 		cJSON *dir_array;
-		if (output_mode == OUT_JSON) {
-			dir_array = cJSON_CreateArray();
-			cJSON_AddItemToObject(root, "children", dir_array);
-		}
+		if (output_mode == OUT_JSON) dir_array = cJSON_CreateArray();
+		add_cjson_item(root, file, url_clean, NULL);
 
 		struct dirent *entry;
-		while ((entry = readdir(st.dir))) {
-			printf("%s\n", entry->d_name);
-			if (entry->d_name[0] == '.') {
-				if (cls->dotfiles) continue;                                       // skip dotfiles
-				if (entry->d_name[1] == '\0') continue;                            // skip "."
-				if (entry->d_name[1] == '.' && entry->d_name[2] == '\0') continue; // skip ".."
-			}
+		while ((entry = readdir(file.dir))) {
+			if (!valid_filename(entry->d_name, cls)) continue;
 
-			if (!stat_file(cls->not_found_file, &st, cls, false)) continue; // skip if cannot open file
+			struct file_detail child_file = {.dir = NULL, .fp = NULL};
+
+			char child_path[PATH_MAX];
+			memcpy(child_path, filepath, PATH_MAX);
+			if (!concat_char(child_path, PATH_MAX, '/')) continue;
+			if (!concat(child_path, PATH_MAX, entry->d_name, strlen(entry->d_name))) continue;
+			if (!open_file(child_path, &child_file, cls, false)) continue; // skip if cannot open file
 
 			switch (output_mode) {
 				case OUT_NONE:
@@ -242,31 +290,36 @@ serve_file:
 				case OUT_HTML:
 					break;
 				case OUT_JSON:;
-					cJSON *dir_obj = cJSON_CreateObject();
-					cJSON_AddStringToObject(dir_obj, "name", entry->d_name);
-					cJSON_AddItemToArray(dir_array, dir_obj);
+					cJSON *child_obj = cJSON_CreateObject();
+					add_cjson_item(child_obj, child_file, url_clean, entry->d_name);
+					cJSON_AddItemToArray(dir_array, child_obj);
 					break;
 			}
 		}
-		close_stat(&st);
+
+		if (output_mode == OUT_JSON) cJSON_AddItemToObject(root, "children", dir_array);
+		close_file(&file);
 		goto respond;
 	}
 	goto not_found; // unsupported file typ
 
 not_found:
-	close_stat(&st);
+	close_file(&file);
 	status = MHD_HTTP_NOT_FOUND;
 	if (cls->not_found_file && !not_found) {
 		// resolve the file
-		if (!stat_file(cls->not_found_file, &st, cls, true)) goto not_found;
+		if (!open_file(cls->not_found_file, &file, cls, true)) goto not_found;
 		goto serve_file;
 	}
+	goto respond;
+too_long:
+	status = MHD_HTTP_URI_TOO_LONG;
 	goto respond;
 bad_request:
 	status = MHD_HTTP_BAD_REQUEST;
 	goto respond;
 respond:;
-	close_stat(&st);
+	close_file(&file);
 	struct MHD_Response *response;
 
 	if (!data) { // if there is no data to respond with
@@ -318,7 +371,7 @@ respond:;
 		        "Request: %s%s%s %s\n"
 		        "Response: %i, %s%s%s%s%s\n",
 		        ip ? ip : "", ip ? ", " : "",
-		        method, url,
+		        method, url_clean[0] ? url_clean : "/",
 		        status,
 		        content_type ? content_type : "", content_type ? ", " : "",
 		        result_file ? result_file : "", result_file ? ", " : "",
