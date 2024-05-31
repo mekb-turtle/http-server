@@ -267,7 +267,10 @@ serve_file:
 		if (!cls->list_directories) goto not_found; // directory listing not allowed
 		result_file = filepath;
 		cJSON *dir_array;
-		if (output_mode == OUT_JSON) dir_array = cJSON_CreateArray();
+		if (output_mode == OUT_JSON) {
+			dir_array = cJSON_CreateArray();
+			cJSON_AddItemToObject(root, "children", dir_array);
+		}
 		add_cjson_item(root, file, url_clean, NULL);
 
 		struct dirent *entry;
@@ -280,11 +283,10 @@ serve_file:
 			memcpy(child_path, filepath, PATH_MAX);
 			if (!concat_char(child_path, PATH_MAX, '/')) continue;
 			if (!concat(child_path, PATH_MAX, entry->d_name, strlen(entry->d_name))) continue;
-			if (!open_file(child_path, &child_file, cls, false)) continue; // skip if cannot open file
+			if (!open_file(child_path, &child_file, cls, true)) continue; // skip if cannot open file
 
 			switch (output_mode) {
 				case OUT_NONE:
-					break;
 				case OUT_TEXT:
 					break;
 				case OUT_HTML:
@@ -295,9 +297,10 @@ serve_file:
 					cJSON_AddItemToArray(dir_array, child_obj);
 					break;
 			}
+
+			close_file(&child_file);
 		}
 
-		if (output_mode == OUT_JSON) cJSON_AddItemToObject(root, "children", dir_array);
 		close_file(&file);
 		goto respond;
 	}
