@@ -218,6 +218,12 @@ int main(int argc, char *argv[]) {
 
 static void signal_handler(int sig) {
 	if (sig == SIGTSTP) return;
+#ifdef SIGWINCH
+	if (sig == SIGWINCH) return;
+#endif
+#ifdef SIGIO
+	if (sig == SIGIO) return;
+#endif
 	printf("Caught signal %i\n", sig);
 	exit(0x80 + sig);
 }
