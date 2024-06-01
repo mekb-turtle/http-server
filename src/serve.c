@@ -212,7 +212,7 @@ static bool WARN_UNUSED construct_html_end(char **base) {
 #undef append
 #undef append_escape
 
-static bool add_dir_item(enum output_mode output_mode, char **data, struct file_detail file, char *url, char *name, cJSON *dir_array) {
+static bool add_dir_item(enum output_mode output_mode, char **data, struct file_detail file, char *url, char *name, cJSON *dir_array, char *class, char *custom_type) {
 	off_t size = file.stat.st_size;
 	char size_str[32];
 	snprintf(size_str, 32, "%li", size);
@@ -233,7 +233,12 @@ static bool add_dir_item(enum output_mode output_mode, char **data, struct file_
 			if (!concat_expand(data, "\n")) goto error;
 			break;
 		case OUT_HTML:
-			if (!concat_expand(data, "<li class=\"file-item\"><a href=\"")) goto error;
+			if (!concat_expand(data, "<li class=\"file-item")) goto error;
+			if (class && class[0] != '\0') {
+				if (!concat_expand(data, " ")) return false;
+				if (!concat_expand_escape(data, class)) return false;
+			}
+			if (!concat_expand(data, "\"><a href=\"")) return false;
 			if (!concat_expand_escape(data, url)) goto error;
 			if (!concat_expand(data, "\" title=\"")) goto error;
 			if (!concat_expand_escape(data, url)) goto error;
@@ -241,16 +246,21 @@ static bool add_dir_item(enum output_mode output_mode, char **data, struct file_
 			if (!concat_expand_escape(data, name)) goto error;
 			if (!concat_expand(data, "</a>")) goto error;
 			if (!concat_expand(data, " - <span class=\"file-type\">")) goto error;
-			if (file.dir) {
-				if (!concat_expand(data, "directory</span>")) goto error;
-			} else if (file.fp) {
-				if (!concat_expand(data, "file</span> - <span class=\"file-size\" title=\"")) goto error;
+			if (!custom_type) {
+				if (file.dir) custom_type = "directory";
+				else if (file.fp)
+					custom_type = "file";
+				else
+					custom_type = "unknown";
+			}
+			if (!concat_expand_escape(data, custom_type)) goto error;
+			if (!concat_expand(data, "</span>")) goto error;
+			if (file.fp) {
+				if (!concat_expand(data, " - <span class=\"file-size\" title=\"")) goto error;
 				if (!concat_expand_escape(data, size_str)) goto error;
 				if (!concat_expand(data, " bytes\">")) goto error;
 				if (!concat_expand_escape(data, size_format)) goto error;
 				if (!concat_expand(data, "</span>")) goto error;
-			} else {
-				if (!concat_expand(data, "unknown</span>")) goto error;
 			}
 			if (!concat_expand(data, "</li>\n")) goto error;
 			break;
@@ -314,10 +324,18 @@ enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connecti
 
 	if (!open_file(filepath, &file, cls, true)) goto not_found;
 
+	char url_parent[PATH_MAX];
+	url_parent[0] = '\0';
+	char filepath_parent[PATH_MAX];
+	memcpy(filepath_parent, filepath, PATH_MAX);
+
 	for (const char *url_path = user_url;;) {
 		while (*url_path == '/') url_path++; // skip leading slashes
 		if (*url_path == '\0') break;        // check for end of path
 		if (is_file) goto not_found;         // file cannot have subdirectories
+
+		memcpy(url_parent, url_clean, PATH_MAX);
+		memcpy(filepath_parent, filepath, PATH_MAX);
 
 		const char *slash = strchrnul_(url_path, '/'); // find next slash (or end of string)
 		size_t segment_len = slash - url_path;         // length of the path segment
@@ -338,7 +356,10 @@ enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connecti
 		if (file.fp) is_file = true;
 	}
 
-#define url_clean_slash (url_clean[0] == '\0' ? "/" : url_clean)
+	if (url_parent[0] == '\0') {
+		url_parent[0] = '/';
+		url_parent[1] = '\0';
+	}
 
 serve_file:
 	if (file.fp) {
@@ -355,6 +376,7 @@ serve_file:
 		if (!cls->list_directories) goto not_found; // directory listing not allowed
 		result_file = filepath;
 		cJSON *dir_array = NULL; // array of directory children
+		char *url_clean_slash = url_clean[0] == '\0' ? "/" : url_clean;
 		switch (output_mode) {
 			case OUT_NONE:
 			case OUT_TEXT:
@@ -381,6 +403,17 @@ serve_file:
 				break;
 		}
 
+		bool res;
+		if (!(url_clean_slash[0] == '\0' || (url_clean_slash[0] == '/' && url_clean_slash[1] == '\0'))) {
+			struct file_detail parent_file = {.dir = NULL, .fp = NULL};
+			if (!open_file(filepath_parent, &parent_file, cls, true)) goto not_found;
+			res = add_dir_item(output_mode, char_data, parent_file, url_parent, "..", dir_array, "parent", "parent directory");
+			if (!res) {
+				close_file(&parent_file);
+				goto server_error;
+			}
+		}
+
 		struct dirent *entry;
 		while ((entry = readdir(file.dir))) {
 			char *child_name = entry->d_name;
@@ -400,7 +433,7 @@ serve_file:
 			if (!concat_char(child_url, PATH_MAX, '/')) return false;
 			if (!concat(child_url, PATH_MAX, child_name)) return false;
 
-			bool res = add_dir_item(output_mode, char_data, child_file, child_url, child_name, dir_array);
+			res = add_dir_item(output_mode, char_data, child_file, child_url, child_name, dir_array, "child", NULL);
 
 			close_file(&child_file);
 			if (res)
@@ -525,7 +558,7 @@ respond:;
 		        "Request: %s%s%s %s\n"
 		        "Response: %i, %s%s%s%s%s\n",
 		        ip ? ip : "", ip ? ", " : "",
-		        method, url_clean_slash,
+		        method, url_clean[0] == '\0' ? "/" : url_clean,
 		        status,
 		        content_type ? content_type : "", content_type ? ", " : "",
 		        result_file ? result_file : "", result_file ? ", " : "",
