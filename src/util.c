@@ -38,7 +38,7 @@ char *WARN_UNUSED concat_expand_n(char **base, const char *add, size_t add_len) 
 	return *base;
 }
 
-char *WARN_UNUSED escape_html_n(char **base, const char *input, size_t input_len) {
+char *WARN_UNUSED concat_expand_escape_n(char **base, const char *input, size_t input_len) {
 	size_t bulk_i = 0;
 	for (size_t i = 0;; i++) {
 		char *escaped = NULL;
@@ -95,10 +95,10 @@ char *WARN_UNUSED concat_expand_char(char **base, char add) {
 	return concat_expand_n(base, &add, 1);
 }
 
-char *WARN_UNUSED escape_html(char **base, const char *input) {
-	return escape_html_n(base, input, strlen(input));
+char *WARN_UNUSED concat_expand_escape(char **base, const char *input) {
+	return concat_expand_escape_n(base, input, strlen(input));
 }
 
-char *WARN_UNUSED escape_html_char(char **base, char input) {
-	return escape_html_n(base, &input, 1);
+char *WARN_UNUSED concat_expand_escape_char(char **base, char input) {
+	return concat_expand_escape_n(base, &input, 1);
 }

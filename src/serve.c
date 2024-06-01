@@ -62,9 +62,11 @@ static enum output_mode {
 			if (strstr(str, "text/html")) return OUT_HTML;
 			else if (strstr(str, "application/json"))
 				return OUT_JSON;
+			else if (strstr(str, "text/plain"))
+				return OUT_TEXT;
 		}
 	}
-	return OUT_TEXT;
+	return OUT_NONE;
 }
 
 struct file_detail {
@@ -181,29 +183,90 @@ static bool add_cjson_item(cJSON *obj, struct file_detail st, char *url, char *n
 	return true;
 }
 
-#define append(str) \
-	if (!concat_expand(base, str)) return false
-#define append_escape(str) \
-	if (!escape_html(base, str)) return false
+extern const char binary_site_css[];
+extern size_t binary_site_css_len;
 
-static bool WARN_UNUSED construct_html_start(char **base, char *title) {
-	append("<html>\n<head>"
-	       "<meta charset=\"utf-8\">"
-	       "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
-	append("<title>");
-	append_escape(title);
-	append("</title></head>\n<body><h1>");
-	append_escape(title);
-	append("</h1>\n");
+static bool WARN_UNUSED construct_html_start(char **base, char *title, char *title_class) {
+	if (!concat_expand(base, "<html>\n<head>"
+	                         "<meta charset=\"utf-8\">"
+	                         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">")) return false;
+	if (!concat_expand(base, "<style>")) return false;
+	if (!concat_expand_n(base, binary_site_css, binary_site_css_len)) return false;
+	if (!concat_expand(base, "</style>")) return false;
+	if (!concat_expand(base, "<title>")) return false;
+	if (!concat_expand_escape(base, title)) return false;
+	if (!concat_expand(base, "</title></head>\n<body><h1 class=\"main-title")) return false;
+	if (title_class && title_class[0] != '\0') {
+		if (!concat_expand(base, " ")) return false;
+		if (!concat_expand_escape(base, title_class)) return false;
+	}
+	if (!concat_expand(base, "\">")) return false;
+	if (!concat_expand_escape(base, title)) return false;
+	if (!concat_expand(base, "</h1><hr/>\n")) return false;
 	return true;
 }
 
 static bool WARN_UNUSED construct_html_end(char **base) {
-	append("\n<hr/></body></html>");
-	return true;
+	return concat_expand(base, "\n<hr/></body></html>");
 }
 #undef append
 #undef append_escape
+
+static bool add_dir_item(enum output_mode output_mode, char **data, struct file_detail file, char *url, char *name, cJSON *dir_array) {
+	off_t size = file.stat.st_size;
+	char size_str[32];
+	snprintf(size_str, 32, "%li", size);
+	char *size_format = format_bytes(size, binary_i);
+
+	switch (output_mode) {
+		case OUT_NONE:
+		case OUT_TEXT:
+			if (!concat_expand(data, "- ")) goto error;
+			if (!concat_expand(data, name)) goto error;
+			if (!concat_expand(data, " - ")) goto error;
+			if (file.dir) {
+				if (!concat_expand(data, "directory")) goto error;
+			} else if (file.fp) {
+				if (!concat_expand(data, "file - ")) goto error;
+				if (!concat_expand(data, size_format)) goto error;
+			}
+			if (!concat_expand(data, "\n")) goto error;
+			break;
+		case OUT_HTML:
+			if (!concat_expand(data, "<li class=\"file-item\"><a href=\"")) goto error;
+			if (!concat_expand_escape(data, url)) goto error;
+			if (!concat_expand(data, "\" title=\"")) goto error;
+			if (!concat_expand_escape(data, url)) goto error;
+			if (!concat_expand(data, "\">")) goto error;
+			if (!concat_expand_escape(data, name)) goto error;
+			if (!concat_expand(data, "</a>")) goto error;
+			if (!concat_expand(data, " - <span class=\"file-type\">")) goto error;
+			if (file.dir) {
+				if (!concat_expand(data, "directory</span>")) goto error;
+			} else if (file.fp) {
+				if (!concat_expand(data, "file</span> - <span class=\"file-size\" title=\"")) goto error;
+				if (!concat_expand_escape(data, size_str)) goto error;
+				if (!concat_expand(data, " bytes\">")) goto error;
+				if (!concat_expand_escape(data, size_format)) goto error;
+				if (!concat_expand(data, "</span>")) goto error;
+			} else {
+				if (!concat_expand(data, "unknown</span>")) goto error;
+			}
+			if (!concat_expand(data, "</li>\n")) goto error;
+			break;
+		case OUT_JSON:;
+			cJSON *obj = cJSON_CreateObject();
+			add_cjson_item(obj, file, url, name);
+			cJSON_AddItemToArray(dir_array, obj);
+			break;
+	}
+
+	free(size_format);
+	return true;
+error:
+	free(size_format);
+	return false;
+}
 
 enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connection,
                                      const char *user_url,
@@ -214,7 +277,7 @@ enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connecti
 #define append(str, label) \
 	if (!concat_expand(char_data, str)) goto label
 #define append_escape(str, label) \
-	if (!escape_html(char_data, str)) goto label
+	if (!concat_expand_escape(char_data, str)) goto label
 
 	void *data = NULL;                                                     // response data
 	enum MHD_ResponseMemoryMode data_memory_mode = MHD_RESPMEM_PERSISTENT; // what mhd should do with the data
@@ -252,8 +315,6 @@ enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connecti
 	if (!open_file(filepath, &file, cls, true)) goto not_found;
 
 	for (const char *url_path = user_url;;) {
-		bool first = url_path == user_url;
-
 		while (*url_path == '/') url_path++; // skip leading slashes
 		if (*url_path == '\0') break;        // check for end of path
 		if (is_file) goto not_found;         // file cannot have subdirectories
@@ -263,8 +324,7 @@ enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connecti
 
 		if (!valid_filename_n(url_path, segment_len, cls)) goto bad_request;
 
-		if (first)
-			if (!concat_char(url_clean, PATH_MAX, '/')) goto too_long;
+		if (!concat_char(url_clean, PATH_MAX, '/')) goto too_long;
 		if (!concat_n(url_clean, PATH_MAX, url_path, segment_len)) goto too_long;
 
 		if (!concat_char(filepath, PATH_MAX, PATH_SEPARATOR)) goto too_long;
@@ -294,10 +354,11 @@ serve_file:
 	} else if (file.dir) {
 		if (!cls->list_directories) goto not_found; // directory listing not allowed
 		result_file = filepath;
-		cJSON *dir_array; // array of directory children
+		cJSON *dir_array = NULL; // array of directory children
 		switch (output_mode) {
 			case OUT_NONE:
 			case OUT_TEXT:
+				output_mode = OUT_TEXT;
 				data_memory_mode = MHD_RESPMEM_MUST_FREE;
 				append("Index of ", server_error);
 				append(url_clean_slash, server_error);
@@ -309,9 +370,9 @@ serve_file:
 				char *title = malloc(title_len);
 				if (!title) goto server_error;
 				snprintf(title, title_len, "Index of %s", url_clean_slash);
-				if (!construct_html_start(char_data, title)) goto server_error;
+				if (!construct_html_start(char_data, title, NULL)) goto server_error;
 				free(title);
-				append("<hr><ul>\n", server_error);
+				append("<ul>\n", server_error);
 				break;
 			case OUT_JSON:
 				dir_array = cJSON_CreateArray();
@@ -339,58 +400,13 @@ serve_file:
 			if (!concat_char(child_url, PATH_MAX, '/')) return false;
 			if (!concat(child_url, PATH_MAX, child_name)) return false;
 
-			off_t child_size = child_file.stat.st_size;
-			char child_size_str[32];
-			snprintf(child_size_str, 32, "%li", child_size);
-			char *child_size_format = format_bytes(child_size, binary_i);
+			bool res = add_dir_item(output_mode, char_data, child_file, child_url, child_name, dir_array);
 
-			switch (output_mode) {
-				case OUT_NONE:
-				case OUT_TEXT:
-					append("- ", server_dir_error);
-					append(child_name, server_dir_error);
-					append(" - ", server_dir_error);
-					if (child_file.dir) {
-						append("directory", server_dir_error);
-					} else if (child_file.fp) {
-						append("file - ", server_dir_error);
-						append(child_size_format, server_dir_error);
-					}
-					append("\n", server_dir_error);
-					break;
-				case OUT_HTML:
-					append("<li><a href=\"", server_dir_error);
-					append_escape(child_url, server_dir_error);
-					append("\" title=\"", server_dir_error);
-					append_escape(child_url, server_dir_error);
-					append("\">", server_dir_error);
-					append_escape(child_name, server_dir_error);
-					append("</a>", server_dir_error);
-					if (child_file.dir) {
-						append(" - directory", server_dir_error);
-					} else if (child_file.fp) {
-						append(" - file - <span title=\"", server_dir_error);
-						append_escape(child_size_str, server_dir_error);
-						append(" bytes\">", server_dir_error);
-						append_escape(child_size_format, server_dir_error);
-						append("</span>", server_dir_error);
-					}
-					append("</li>\n", server_dir_error);
-					break;
-				case OUT_JSON:;
-					cJSON *child_obj = cJSON_CreateObject();
-					add_cjson_item(child_obj, child_file, child_url, child_name);
-					cJSON_AddItemToArray(dir_array, child_obj);
-					break;
-			}
-
-			free(child_size_format);
 			close_file(&child_file);
-			continue;
-		server_dir_error:
-			free(child_size_format);
-			close_file(&child_file);
-			goto server_error;
+			if (res)
+				continue;
+			else
+				goto server_error;
 		}
 
 		if (output_mode == OUT_HTML) {
@@ -447,16 +463,16 @@ respond:;
 			// write out status code
 			switch (output_mode) {
 				case OUT_NONE:
-					break;
 				case OUT_TEXT:
+					output_mode = OUT_TEXT;
 					data_memory_mode = MHD_RESPMEM_MUST_FREE;
 					append(full_status_str, server_error);
 					append("\n", server_error);
 					break;
 				case OUT_HTML:
 					data_memory_mode = MHD_RESPMEM_MUST_FREE;
-					if (!construct_html_start(char_data, full_status_str)) goto server_error;
-					append("<p><a href=\"/\">Main Page</a></p>\n", server_error);
+					if (!construct_html_start(char_data, full_status_str, "error")) goto server_error;
+					append("<p><a class=\"main-page\" href=\"/\">Main Page</a></p>\n", server_error);
 					if (!construct_html_end(char_data)) goto server_error;
 					break;
 				case OUT_JSON:;

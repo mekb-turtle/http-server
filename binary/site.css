@@ -1,3 +1,41 @@
-.main-title {
-
+body, html {
+	font-family: "Helvetica Neue", Roboto, "Segoe UI", Arial, sans-serif;
+	font-size: 16px;
+	color: #222222;
+	background-color: #f9f9f9;
+	margin: 0;
+	padding: 0;
+}
+body {
+	margin: 5%;
+}
+hr {
+	border: 0;
+	border-top: 0.2em solid #dddddd;
+}
+.error {
+	color: #a94442;
+}
+li::marker {
+	color: #999999;
+}
+ul, ol {
+	margin-top: 0.5em;
+	margin-bottom: 0.5em;
+}
+li {
+	padding-left: 0.1em;
+	list-style-type: square;
+	margin-top: 0.5em;
+	margin-bottom: 0.5em;
+}
+a {
+	color: #337ab7;
+	text-decoration: none;
+}
+a:visited {
+	color: #432cb7;
+}
+a:hover {
+	text-decoration: underline;
 }
