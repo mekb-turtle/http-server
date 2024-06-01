@@ -11,6 +11,7 @@ struct httpd_data {
 	bool follow_symlinks;
 	bool list_directories;
 	bool quiet;
+	bool show_server_info;
 };
 
 extern enum MHD_Result answer_to_connection(void *cls, struct MHD_Connection *connection,

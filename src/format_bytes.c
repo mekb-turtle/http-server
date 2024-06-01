@@ -40,9 +40,7 @@ char *format_bytes(size_t byte, enum format_bytes_mode mode) {
 	if (remainder == 0) fraction_part = 0; // prevent floating point weirdness
 
 	char *frac_str, *str;
-	if (!(frac_str = malloc(64))) {
-		return NULL;
-	}
+	if (!(frac_str = malloc(64))) return NULL;
 
 	// fraction part in a separate string so we can trim off until the decimal point
 	if (snprintf(frac_str, 64, "%.*g", scale, fraction_part) < 0) {
@@ -90,4 +88,3 @@ snprintf_error:
 	free(str);
 	return NULL;
 }
-

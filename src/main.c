@@ -28,6 +28,7 @@ static struct option options_getopt[] = {
         {"directory", no_argument,       0, 'd'},
         {"notfound",  required_argument, 0, 'n'},
         {"404",       required_argument, 0, 'n'},
+        {"no-info",   no_argument,       0, 'M'},
         {0,           0,                 0, 0  }
 };
 
@@ -42,9 +43,10 @@ int main(int argc, char *argv[]) {
 
 	struct httpd_data data;
 	memset(&data, 0, sizeof(data));
+	data.show_server_info = true;
 
 	// argument handling
-	while ((opt = getopt_long(argc, argv, ":hVa:p:qfsdn:", options_getopt, NULL)) != -1) {
+	while ((opt = getopt_long(argc, argv, ":hVa:p:qfsdn:M", options_getopt, NULL)) != -1) {
 		switch (opt) {
 			case 'h':
 				printf("Usage: %s [option]... [directory/file]\n", TARGET);
@@ -56,6 +58,7 @@ int main(int argc, char *argv[]) {
 				printf("-f --dotfiles: Allow serving files starting with `.`\n");
 				printf("-s --symlink: Follow symlinks\n");
 				printf("-d --directory: List directories\n");
+				printf("-M --no-info: Don't show server info in directory listings\n");
 				printf("-n --notfound --404 [directory/file]: Set what file to serve on 404\n");
 				return 0;
 			case 'V':
@@ -83,6 +86,11 @@ int main(int argc, char *argv[]) {
 							if (data.list_directories) invalid = true;
 							else
 								data.list_directories = true;
+							break;
+						case 'M':
+							if (!data.show_server_info) invalid = true;
+							else
+								data.show_server_info = false;
 							break;
 						case 'n':
 							if (data.not_found_file) {

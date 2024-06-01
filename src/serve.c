@@ -12,6 +12,7 @@
 #include <cjson/cJSON.h>
 #include "util.h"
 #include "format_bytes.h"
+#include "status_code.h"
 
 #define eprintf(...) fprintf(stderr, __VA_ARGS__)
 
@@ -164,44 +165,66 @@ static bool valid_filename(const char *name, struct httpd_data *cls) {
 	return valid_filename_n(name, strlen(name), cls);
 }
 
-static bool add_cjson_item(cJSON *root, struct file_detail st, char *url_dir, char *url_name) {
-	if (url_name && url_dir) {
-		char new_url[PATH_MAX];
-		memcpy(new_url, url_dir, PATH_MAX);
-		if (!concat_char(new_url, PATH_MAX, '/')) return false;
-		if (!concat(new_url, PATH_MAX, url_name, strlen(url_name))) return false;
-		url_dir = new_url;
-	} else if (url_dir && url_dir[0] == '\0') {
-		url_dir = "/";
-	}
-	if (url_dir) cJSON_AddStringToObject(root, "url", url_dir);
-	if (url_name) cJSON_AddStringToObject(root, "name", url_name);
+static bool add_cjson_item(cJSON *obj, struct file_detail st, char *url, char *name) {
+	if (url) cJSON_AddStringToObject(obj, "url", url);
+	if (name) cJSON_AddStringToObject(obj, "name", name);
 	if (st.dir) {
-		cJSON_AddStringToObject(root, "type", "directory");
+		cJSON_AddStringToObject(obj, "type", "directory");
 	} else if (st.fp) {
-		cJSON_AddStringToObject(root, "type", "file");
+		cJSON_AddStringToObject(obj, "type", "file");
 	} else {
 		return false;
 	}
 	if (st.fp) {
-		cJSON_AddNumberToObject(root, "size", st.stat.st_size);
+		cJSON_AddNumberToObject(obj, "size", st.stat.st_size);
 	}
 	return true;
 }
 
+#define append(str) \
+	if (!concat_expand(base, str)) return false
+#define append_escape(str) \
+	if (!escape_html(base, str)) return false
+
+static bool WARN_UNUSED construct_html_start(char **base, char *title) {
+	append("<html>\n<head>"
+	       "<meta charset=\"utf-8\">"
+	       "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
+	append("<title>");
+	append_escape(title);
+	append("</title></head>\n<body><h1>");
+	append_escape(title);
+	append("</h1>\n");
+	return true;
+}
+
+static bool WARN_UNUSED construct_html_end(char **base) {
+	append("\n<hr/></body></html>");
+	return true;
+}
+#undef append
+#undef append_escape
+
 enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connection,
-                                     const char *url,
+                                     const char *user_url,
                                      const char *method, const char *version,
                                      const char *upload_data,
                                      size_t *upload_data_size, void **req_cls) {
+#define char_data ((char **) &data)
+#define append(str, label) \
+	if (!concat_expand(char_data, str)) goto label
+#define append_escape(str, label) \
+	if (!escape_html(char_data, str)) goto label
+
 	void *data = NULL;                                                     // response data
 	enum MHD_ResponseMemoryMode data_memory_mode = MHD_RESPMEM_PERSISTENT; // what mhd should do with the data
-	size_t size;                                                           // size of the response data
-	unsigned int status = MHD_HTTP_OK;                                     // response status
-	char *content_type = NULL;                                             // response content type
-	cJSON *root = cJSON_CreateObject();                                    // for responding with JSON data
-	char *result_file = NULL;                                              // used for logging
-	bool not_found = false;
+	size_t size = 0;                                                       // size of the response data
+
+	unsigned int status = MHD_HTTP_OK;  // response status
+	char *content_type = NULL;          // response content type
+	cJSON *root = cJSON_CreateObject(); // for responding with JSON data
+	char *result_file = NULL;           // used for logging
+	bool not_found = false;             // for custom 404 page
 
 	// get accept content type
 	const char *accept_type = MHD_lookup_connection_value(connection, MHD_HEADER_KIND, MHD_HTTP_HEADER_ACCEPT);
@@ -215,7 +238,7 @@ enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connecti
 	}
 
 	// validate url
-	if (url[0] != '/') goto bad_request;
+	if (user_url[0] != '/') goto bad_request;
 
 	char filepath[PATH_MAX]; // full path to file
 	strcpy(filepath, cls->base_file);
@@ -228,77 +251,157 @@ enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connecti
 
 	if (!open_file(filepath, &file, cls, true)) goto not_found;
 
-	for (const char *urlpath = url;;) {
-		bool first = urlpath == url;
+	for (const char *url_path = user_url;;) {
+		bool first = url_path == user_url;
 
-		while (*urlpath == '/') urlpath++; // skip leading slashes
-		if (*urlpath == '\0') break;       // check for end of path
-		if (is_file) goto not_found;       // file cannot have subdirectories
+		while (*url_path == '/') url_path++; // skip leading slashes
+		if (*url_path == '\0') break;        // check for end of path
+		if (is_file) goto not_found;         // file cannot have subdirectories
 
-		const char *slash = strchrnul_(urlpath, '/'); // find next slash (or end of string)
-		size_t segment_len = slash - urlpath;         // length of the path segment
+		const char *slash = strchrnul_(url_path, '/'); // find next slash (or end of string)
+		size_t segment_len = slash - url_path;         // length of the path segment
 
-		if (!valid_filename_n(urlpath, segment_len, cls)) goto bad_request;
+		if (!valid_filename_n(url_path, segment_len, cls)) goto bad_request;
 
 		if (first)
 			if (!concat_char(url_clean, PATH_MAX, '/')) goto too_long;
-		if (!concat(url_clean, PATH_MAX, urlpath, segment_len)) goto too_long;
+		if (!concat_n(url_clean, PATH_MAX, url_path, segment_len)) goto too_long;
 
 		if (!concat_char(filepath, PATH_MAX, PATH_SEPARATOR)) goto too_long;
-		if (!concat(filepath, PATH_MAX, urlpath, segment_len)) goto too_long;
+		if (!concat_n(filepath, PATH_MAX, url_path, segment_len)) goto too_long;
 
 		// skip to the next segment
-		urlpath = slash;
+		url_path = slash;
 
 		// resolve the file
 		if (!open_file(filepath, &file, cls, true)) goto not_found;
 		if (file.fp) is_file = true;
 	}
 
+#define url_clean_slash (url_clean[0] == '\0' ? "/" : url_clean)
+
 serve_file:
 	if (file.fp) {
 		//TODO
+		/*
 		result_file = filepath;
 		output_mode = OUT_NONE;
 		data = "test";
 		size = 4;
+		*/
+		status = MHD_HTTP_NOT_IMPLEMENTED;
 		goto respond;
 	} else if (file.dir) {
 		if (!cls->list_directories) goto not_found; // directory listing not allowed
 		result_file = filepath;
-		cJSON *dir_array;
-		if (output_mode == OUT_JSON) {
-			dir_array = cJSON_CreateArray();
-			cJSON_AddItemToObject(root, "children", dir_array);
+		cJSON *dir_array; // array of directory children
+		switch (output_mode) {
+			case OUT_NONE:
+			case OUT_TEXT:
+				data_memory_mode = MHD_RESPMEM_MUST_FREE;
+				append("Index of ", server_error);
+				append(url_clean_slash, server_error);
+				append("\n\n", server_error);
+				break;
+			case OUT_HTML:
+				data_memory_mode = MHD_RESPMEM_MUST_FREE;
+				size_t title_len = strlen(url_clean_slash) + 32;
+				char *title = malloc(title_len);
+				if (!title) goto server_error;
+				snprintf(title, title_len, "Index of %s", url_clean_slash);
+				if (!construct_html_start(char_data, title)) goto server_error;
+				free(title);
+				append("<hr><ul>\n", server_error);
+				break;
+			case OUT_JSON:
+				dir_array = cJSON_CreateArray();
+				cJSON_AddItemToObject(root, "children", dir_array);
+				add_cjson_item(root, file, url_clean_slash, NULL);
+				break;
 		}
-		add_cjson_item(root, file, url_clean, NULL);
 
 		struct dirent *entry;
 		while ((entry = readdir(file.dir))) {
-			if (!valid_filename(entry->d_name, cls)) continue;
+			char *child_name = entry->d_name;
+
+			if (!valid_filename(child_name, cls)) continue;
 
 			struct file_detail child_file = {.dir = NULL, .fp = NULL};
 
 			char child_path[PATH_MAX];
 			memcpy(child_path, filepath, PATH_MAX);
 			if (!concat_char(child_path, PATH_MAX, '/')) continue;
-			if (!concat(child_path, PATH_MAX, entry->d_name, strlen(entry->d_name))) continue;
+			if (!concat(child_path, PATH_MAX, child_name)) continue;
 			if (!open_file(child_path, &child_file, cls, true)) continue; // skip if cannot open file
+
+			char child_url[PATH_MAX];
+			memcpy(child_url, url_clean, PATH_MAX);
+			if (!concat_char(child_url, PATH_MAX, '/')) return false;
+			if (!concat(child_url, PATH_MAX, child_name)) return false;
+
+			off_t child_size = child_file.stat.st_size;
+			char child_size_str[32];
+			snprintf(child_size_str, 32, "%li", child_size);
+			char *child_size_format = format_bytes(child_size, binary_i);
 
 			switch (output_mode) {
 				case OUT_NONE:
 				case OUT_TEXT:
+					append("- ", server_dir_error);
+					append(child_name, server_dir_error);
+					append(" - ", server_dir_error);
+					if (child_file.dir) {
+						append("directory", server_dir_error);
+					} else if (child_file.fp) {
+						append("file - ", server_dir_error);
+						append(child_size_format, server_dir_error);
+					}
+					append("\n", server_dir_error);
 					break;
 				case OUT_HTML:
+					append("<li><a href=\"", server_dir_error);
+					append_escape(child_url, server_dir_error);
+					append("\" title=\"", server_dir_error);
+					append_escape(child_url, server_dir_error);
+					append("\">", server_dir_error);
+					append_escape(child_name, server_dir_error);
+					append("</a>", server_dir_error);
+					if (child_file.dir) {
+						append(" - directory", server_dir_error);
+					} else if (child_file.fp) {
+						append(" - file - <span title=\"", server_dir_error);
+						append_escape(child_size_str, server_dir_error);
+						append(" bytes\">", server_dir_error);
+						append_escape(child_size_format, server_dir_error);
+						append("</span>", server_dir_error);
+					}
+					append("</li>\n", server_dir_error);
 					break;
 				case OUT_JSON:;
 					cJSON *child_obj = cJSON_CreateObject();
-					add_cjson_item(child_obj, child_file, url_clean, entry->d_name);
+					add_cjson_item(child_obj, child_file, child_url, child_name);
 					cJSON_AddItemToArray(dir_array, child_obj);
 					break;
 			}
 
+			free(child_size_format);
 			close_file(&child_file);
+			continue;
+		server_dir_error:
+			free(child_size_format);
+			close_file(&child_file);
+			goto server_error;
+		}
+
+		if (output_mode == OUT_HTML) {
+			append("</ul>", server_error);
+			if (!construct_html_end(char_data)) goto server_error;
+		}
+
+		if (output_mode != OUT_JSON) {
+			append("\n", server_error);
+			size = strlen(*char_data);
+			data = *char_data;
 		}
 
 		close_file(&file);
@@ -310,10 +413,14 @@ not_found:
 	close_file(&file);
 	status = MHD_HTTP_NOT_FOUND;
 	if (cls->not_found_file && !not_found) {
+		not_found = true;
 		// resolve the file
 		if (!open_file(cls->not_found_file, &file, cls, true)) goto not_found;
 		goto serve_file;
 	}
+	goto respond;
+server_error:
+	status = MHD_HTTP_INTERNAL_SERVER_ERROR;
 	goto respond;
 too_long:
 	status = MHD_HTTP_URI_TOO_LONG;
@@ -326,19 +433,48 @@ respond:;
 	struct MHD_Response *response;
 
 	if (!data) { // if there is no data to respond with
-		if (output_mode == OUT_JSON) {
-			// set status code in JSON
-			cJSON_AddNumberToObject(root, "status", status);
+		size = 0;
 
-			// encode JSON data and respond with it
-			char *json = cJSON_Print(root);
-			data = json;
-			size = strlen(json);
-			data_memory_mode = MHD_RESPMEM_MUST_FREE; // free the data after responding
-		} else {
-			// respond with an empty response
-			output_mode = OUT_NONE;
-			size = 0;
+		if (status != MHD_HTTP_NO_CONTENT) {
+			char *status_name = status_codes[status];
+
+			size_t full_status_str_len = strlen(status_name) + 32;
+			char full_status_str[full_status_str_len];
+			snprintf(full_status_str, full_status_str_len, "%i - %s", status, status_name);
+
+			bool is_error = status >= 400;
+
+			// write out status code
+			switch (output_mode) {
+				case OUT_NONE:
+					break;
+				case OUT_TEXT:
+					data_memory_mode = MHD_RESPMEM_MUST_FREE;
+					append(full_status_str, server_error);
+					append("\n", server_error);
+					break;
+				case OUT_HTML:
+					data_memory_mode = MHD_RESPMEM_MUST_FREE;
+					if (!construct_html_start(char_data, full_status_str)) goto server_error;
+					append("<p><a href=\"/\">Main Page</a></p>\n", server_error);
+					if (!construct_html_end(char_data)) goto server_error;
+					break;
+				case OUT_JSON:;
+					// set status code in JSON
+					cJSON *status_obj = cJSON_CreateObject();
+					cJSON_AddNumberToObject(status_obj, "number", status);
+					cJSON_AddStringToObject(status_obj, "message", status_name);
+					cJSON_AddBoolToObject(status_obj, "ok", !is_error);
+					cJSON_AddItemToObject(root, "status", status_obj);
+
+					// encode JSON data and respond with it
+					data = cJSON_Print(root);
+					append("\n", server_error);
+					data_memory_mode = MHD_RESPMEM_MUST_FREE; // free the data after responding
+					break;
+			}
+
+			if (data) size = strlen(data);
 		}
 	}
 
@@ -359,10 +495,9 @@ respond:;
 		}
 	}
 
-	int ret;
 	response = MHD_create_response_from_buffer(size, data, data_memory_mode);
 	MHD_add_response_header(response, MHD_HTTP_HEADER_CONTENT_TYPE, content_type);
-	ret = MHD_queue_response(connection, status, response);
+	int ret = MHD_queue_response(connection, status, response);
 	MHD_destroy_response(response);
 
 	if (!cls->quiet) {
@@ -374,7 +509,7 @@ respond:;
 		        "Request: %s%s%s %s\n"
 		        "Response: %i, %s%s%s%s%s\n",
 		        ip ? ip : "", ip ? ", " : "",
-		        method, url_clean[0] ? url_clean : "/",
+		        method, url_clean_slash,
 		        status,
 		        content_type ? content_type : "", content_type ? ", " : "",
 		        result_file ? result_file : "", result_file ? ", " : "",
