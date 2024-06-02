@@ -196,12 +196,12 @@ static bool WARN_UNUSED construct_html_start(char **base, char *title, char *tit
 	}
 	if (!concat_expand(base, "\">")) return false;
 	if (!concat_expand_escape(base, title)) return false;
-	if (!concat_expand(base, "</h1><hr/>\n")) return false;
+	if (!concat_expand(base, "</h1><hr/><div class=\"main\">\n")) return false;
 	return true;
 }
 
 static bool WARN_UNUSED construct_html_end(char **base) {
-	return concat_expand(base, "\n<hr/></body></html>");
+	return concat_expand(base, "\n</div><hr/></body></html>");
 }
 #undef append
 #undef append_escape
