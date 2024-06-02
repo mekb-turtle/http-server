@@ -16,12 +16,6 @@
 
 #define eprintf(...) fprintf(stderr, __VA_ARGS__)
 
-#ifdef _WIN32
-#define PATH_SEPARATOR '\\'
-#else
-#define PATH_SEPARATOR '/'
-#endif
-
 static char *sockaddr_to_string(struct sockaddr *addr) {
 	if (addr)
 		switch (addr->sa_family) {
@@ -298,6 +292,7 @@ enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connecti
 	cJSON *root = cJSON_CreateObject(); // for responding with JSON data
 	char *result_file = NULL;           // used for logging
 	bool not_found = false;             // for custom 404 page
+	bool root_path = true;
 
 	// get accept content type
 	const char *accept_type = MHD_lookup_connection_value(connection, MHD_HEADER_KIND, MHD_HTTP_HEADER_ACCEPT);
@@ -316,8 +311,8 @@ enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connecti
 	char filepath[PATH_MAX]; // full path to file
 	strcpy(filepath, cls->base_file);
 
-	char url_clean[PATH_MAX];
-	url_clean[0] = '\0';
+	char url[PATH_MAX];
+	url[0] = '\0';
 
 	struct file_detail file = {.dir = NULL, .fp = NULL};
 	bool is_file = false;
@@ -325,37 +320,39 @@ enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connecti
 	if (!open_file(filepath, &file, cls, true)) goto not_found;
 
 	char url_parent[PATH_MAX];
-	url_parent[0] = '\0';
+	memcpy(url_parent, url, PATH_MAX);
 	char filepath_parent[PATH_MAX];
 	memcpy(filepath_parent, filepath, PATH_MAX);
 
-	for (const char *url_path = user_url;;) {
-		while (*url_path == '/') url_path++; // skip leading slashes
-		if (*url_path == '\0') break;        // check for end of path
-		if (is_file) goto not_found;         // file cannot have subdirectories
+	for (const char *segment = user_url;;) {
+		while (*segment == '/') segment++; // skip leading slashes
+		if (*segment == '\0') break;       // check for end of path
+		if (is_file) goto not_found;       // file cannot have subdirectories
 
-		memcpy(url_parent, url_clean, PATH_MAX);
+		root_path = false;
+		memcpy(url_parent, url, PATH_MAX);
 		memcpy(filepath_parent, filepath, PATH_MAX);
 
-		const char *slash = strchrnul_(url_path, '/'); // find next slash (or end of string)
-		size_t segment_len = slash - url_path;         // length of the path segment
+		const char *slash = strchrnul_(segment, '/'); // find next slash (or end of string)
+		size_t segment_len = slash - segment;         // length of the path segment
 
-		if (!valid_filename_n(url_path, segment_len, cls)) goto bad_request;
-
-		if (!concat_char(url_clean, PATH_MAX, '/')) goto too_long;
-		if (!concat_n(url_clean, PATH_MAX, url_path, segment_len)) goto too_long;
-
-		if (!concat_char(filepath, PATH_MAX, PATH_SEPARATOR)) goto too_long;
-		if (!concat_n(filepath, PATH_MAX, url_path, segment_len)) goto too_long;
+		if (!valid_filename_n(segment, segment_len, cls)) goto bad_request;
+		if (!join_url_path_n(url, PATH_MAX, segment, segment_len)) goto too_long;
+		if (!join_filepath_n(filepath, PATH_MAX, segment, segment_len)) goto too_long;
 
 		// skip to the next segment
-		url_path = slash;
+		segment = slash;
 
 		// resolve the file
 		if (!open_file(filepath, &file, cls, true)) goto not_found;
 		if (file.fp) is_file = true;
 	}
 
+	// set path to / if empty
+	if (url[0] == '\0') {
+		url[0] = '/';
+		url[1] = '\0';
+	}
 	if (url_parent[0] == '\0') {
 		url_parent[0] = '/';
 		url_parent[1] = '\0';
@@ -373,25 +370,25 @@ serve_file:
 		status = MHD_HTTP_NOT_IMPLEMENTED;
 		goto respond;
 	} else if (file.dir) {
+		if (not_found) goto not_found; // custom 404 page doesn't support directory listing
 		if (!cls->list_directories) goto not_found; // directory listing not allowed
 		result_file = filepath;
 		cJSON *dir_array = NULL; // array of directory children
-		char *url_clean_slash = url_clean[0] == '\0' ? "/" : url_clean;
 		switch (output_mode) {
 			case OUT_NONE:
 			case OUT_TEXT:
 				output_mode = OUT_TEXT;
 				data_memory_mode = MHD_RESPMEM_MUST_FREE;
 				append("Index of ", server_error);
-				append(url_clean_slash, server_error);
+				append(url, server_error);
 				append("\n\n", server_error);
 				break;
 			case OUT_HTML:
 				data_memory_mode = MHD_RESPMEM_MUST_FREE;
-				size_t title_len = strlen(url_clean_slash) + 32;
+				size_t title_len = strlen(url) + 32;
 				char *title = malloc(title_len);
 				if (!title) goto server_error;
-				snprintf(title, title_len, "Index of %s", url_clean_slash);
+				snprintf(title, title_len, "Index of %s", url);
 				if (!construct_html_start(char_data, title, NULL)) goto server_error;
 				free(title);
 				append("<ul>\n", server_error);
@@ -399,12 +396,13 @@ serve_file:
 			case OUT_JSON:
 				dir_array = cJSON_CreateArray();
 				cJSON_AddItemToObject(root, "children", dir_array);
-				add_cjson_item(root, file, url_clean_slash, NULL);
+				add_cjson_item(root, file, url, NULL);
 				break;
 		}
 
 		bool res;
-		if (!(url_clean_slash[0] == '\0' || (url_clean_slash[0] == '/' && url_clean_slash[1] == '\0'))) {
+		if (!root_path) {
+			// add parent directory link
 			struct file_detail parent_file = {.dir = NULL, .fp = NULL};
 			if (!open_file(filepath_parent, &parent_file, cls, true)) goto not_found;
 			res = add_dir_item(output_mode, char_data, parent_file, url_parent, "..", dir_array, "parent", "parent directory");
@@ -422,16 +420,14 @@ serve_file:
 
 			struct file_detail child_file = {.dir = NULL, .fp = NULL};
 
-			char child_path[PATH_MAX];
-			memcpy(child_path, filepath, PATH_MAX);
-			if (!concat_char(child_path, PATH_MAX, '/')) continue;
-			if (!concat(child_path, PATH_MAX, child_name)) continue;
-			if (!open_file(child_path, &child_file, cls, true)) continue; // skip if cannot open file
+			char child_filepath[PATH_MAX];
+			memcpy(child_filepath, filepath, PATH_MAX);
+			if (!join_filepath(child_filepath, PATH_MAX, child_name)) continue;
+			if (!open_file(child_filepath, &child_file, cls, true)) continue; // skip if cannot open file
 
 			char child_url[PATH_MAX];
-			memcpy(child_url, url_clean, PATH_MAX);
-			if (!concat_char(child_url, PATH_MAX, '/')) return false;
-			if (!concat(child_url, PATH_MAX, child_name)) return false;
+			memcpy(child_url, url, PATH_MAX);
+			if (!join_url_path(child_url, PATH_MAX, child_name)) continue;
 
 			res = add_dir_item(output_mode, char_data, child_file, child_url, child_name, dir_array, "child", NULL);
 
@@ -461,7 +457,9 @@ serve_file:
 not_found:
 	close_file(&file);
 	status = MHD_HTTP_NOT_FOUND;
-	if (cls->not_found_file && !not_found) {
+	if (not_found) {
+		eprintf("Error reading 404 file: %s\n", cls->not_found_file);
+	} else if (cls->not_found_file) {
 		not_found = true;
 		// resolve the file
 		if (!open_file(cls->not_found_file, &file, cls, true)) goto not_found;
@@ -558,7 +556,7 @@ respond:;
 		        "Request: %s%s%s %s\n"
 		        "Response: %i, %s%s%s%s%s\n",
 		        ip ? ip : "", ip ? ", " : "",
-		        method, url_clean[0] == '\0' ? "/" : url_clean,
+		        method, url,
 		        status,
 		        content_type ? content_type : "", content_type ? ", " : "",
 		        result_file ? result_file : "", result_file ? ", " : "",

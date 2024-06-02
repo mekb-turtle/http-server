@@ -102,3 +102,27 @@ char *WARN_UNUSED concat_expand_escape(char **base, const char *input) {
 char *WARN_UNUSED concat_expand_escape_char(char **base, char input) {
 	return concat_expand_escape_n(base, &input, 1);
 }
+
+static char *WARN_UNUSED internal_join_filepath_n(char *base, size_t base_max_len, const char *add, size_t add_len, char path_separator) {
+	size_t base_len = strlen(base);
+	if (base_len == 0 || base[base_len - 1] != path_separator)
+		if (!concat_char(base, base_max_len, path_separator)) return NULL;
+	if (!concat_n(base, base_max_len, add, add_len)) return NULL;
+	return base;
+}
+
+char *WARN_UNUSED join_filepath_n(char *base, size_t base_max_len, const char *add, size_t add_len) {
+	return internal_join_filepath_n(base, base_max_len, add, add_len, PATH_SEPARATOR);
+}
+
+char *WARN_UNUSED join_url_path_n(char *base, size_t base_max_len, const char *add, size_t add_len) {
+	return internal_join_filepath_n(base, base_max_len, add, add_len, '/');
+}
+
+char *WARN_UNUSED join_filepath(char *base, size_t base_max_len, const char *add) {
+	return join_filepath_n(base, base_max_len, add, strlen(add));
+}
+
+char *WARN_UNUSED join_url_path(char *base, size_t base_max_len, const char *add) {
+	return join_url_path_n(base, base_max_len, add, strlen(add));
+}

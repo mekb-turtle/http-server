@@ -45,6 +45,8 @@ int main(int argc, char *argv[]) {
 	memset(&data, 0, sizeof(data));
 	data.show_server_info = true;
 
+	char nf_filename[PATH_MAX];
+
 	// argument handling
 	while ((opt = getopt_long(argc, argv, ":hVa:p:qfsdn:M", options_getopt, NULL)) != -1) {
 		switch (opt) {
@@ -59,7 +61,7 @@ int main(int argc, char *argv[]) {
 				printf("-s --symlink: Follow symlinks\n");
 				printf("-d --directory: List directories\n");
 				printf("-M --no-info: Don't show server info in directory listings\n");
-				printf("-n --notfound --404 [directory/file]: Set what file to serve on 404\n");
+				printf("-n --notfound --404 [file]: Set what file to serve on 404\n");
 				return 0;
 			case 'V':
 				printf("%s %s\n", TARGET, VERSION);
@@ -98,14 +100,11 @@ int main(int argc, char *argv[]) {
 								invalid = true;
 								break;
 							}
-							char *filename_ = optarg;
-							char filename[PATH_MAX];
-							if (!filename_) filename_ = ".";
-							if (!realpath(filename_, filename)) {
-								eprintf("404 path: %s: %s\n", filename_, strerror(errno));
+							if (!realpath(optarg, nf_filename)) {
+								eprintf("404 file: %s: %s\n", optarg, strerror(errno));
 								return 1;
 							}
-							data.not_found_file = filename;
+							data.not_found_file = nf_filename;
 							break;
 						case 'a':
 							if (address) {
@@ -140,7 +139,7 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	if (optind != argc || invalid) {
+	if ((optind != argc && optind != argc - 1) || invalid) {
 		eprintf("Invalid usage, try --help\n");
 		return 1;
 	}
@@ -149,9 +148,8 @@ int main(int argc, char *argv[]) {
 	if (!port_set) port = 8080;
 
 	// get real file path
-	char *filename_ = argv[optind];
+	char *filename_ = optind == argc - 1 ? argv[optind] : ".";
 	char filename[PATH_MAX];
-	if (!filename_) filename_ = ".";
 	if (!realpath(filename_, filename)) {
 		eprintf("Base path: %s\n", filename_);
 		return 1;
