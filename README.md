@@ -5,5 +5,6 @@
 To-do:
 
 - [ ] Serve files
-- [ ] Directory listing
-- [ ] Let user choose custom 404 page
+- [ ] File caching
+- [x] Directory listing
+- [x] Let user choose custom 404 page
