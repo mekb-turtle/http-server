@@ -207,21 +207,25 @@ int main(int argc, char *argv[]) {
 
 	// wait for exit
 	atexit(handle_exit);
-	for (int i = 0; i < NSIG; ++i) {
-		if (i == SIGKILL || i == SIGSTOP) continue;
-		signal(i, signal_handler);
-	}
+	int signals[] = {
+	        SIGABRT,
+	        SIGALRM,
+	        SIGHUP,
+	        SIGINT,
+	        SIGPIPE,
+	        SIGQUIT,
+	        SIGTERM,
+	        SIGPOLL,
+	        SIGPROF,
+	        SIGVTALRM};
+	for (int i = 0; i < sizeof(signals) / sizeof(signals[0]); i++)
+		signal(signals[i], signal_handler);
+	signal(SIGUSR1, signal_handler); // TODO: make it clear cache
+	signal(SIGUSR2, signal_handler);
 	while (true) pause();
 }
 
 static void signal_handler(int sig) {
-	if (sig == SIGTSTP) return;
-#ifdef SIGWINCH
-	if (sig == SIGWINCH) return;
-#endif
-#ifdef SIGIO
-	if (sig == SIGIO) return;
-#endif
 	printf("Caught signal %i\n", sig);
 	exit(0x80 + sig);
 }
