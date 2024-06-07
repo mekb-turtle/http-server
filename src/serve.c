@@ -40,7 +40,21 @@ static enum output_mode {
 	OUT_TEXT,
 	OUT_HTML,
 	OUT_JSON
-} get_output_mode(const char *accept_type) {
+} get_output_mode(struct MHD_Connection *connection) {
+	// get ?output query parameter
+	const char *output = MHD_lookup_connection_value(connection, MHD_GET_ARGUMENT_KIND, "output");
+	if (output) {
+		if (strcmp(output, "none") == 0 || strcmp(output, "raw") == 0)
+			return OUT_NONE;
+		else if (strcmp(output, "text") == 0)
+			return OUT_TEXT;
+		else if (strcmp(output, "html") == 0)
+			return OUT_HTML;
+		else if (strcmp(output, "json") == 0)
+			return OUT_JSON;
+	}
+	// get Accept header
+	const char *accept_type = MHD_lookup_connection_value(connection, MHD_HEADER_KIND, MHD_HTTP_HEADER_ACCEPT);
 	if (accept_type) {
 		size_t len = strlen(accept_type);
 		if (len <= 1024) {                     // arbitrary limit
@@ -272,36 +286,48 @@ error:
 	return false;
 }
 
+struct output_data {
+	union {
+		void *data;
+		char *text;
+	};
+	enum MHD_ResponseMemoryMode data_memory;
+	size_t size;
+	unsigned int status;
+	char *content_type;
+	char *result_file;
+};
+
 enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connection,
                                      const char *user_url,
                                      const char *method, const char *version,
                                      const char *upload_data,
                                      size_t *upload_data_size, void **req_cls) {
-#define char_data ((char **) &data)
 #define append(str, label) \
-	if (!concat_expand(char_data, str)) goto label
+	if (!concat_expand(&output.text, str)) goto label
 #define append_escape(str, label) \
-	if (!concat_expand_escape(char_data, str)) goto label
+	if (!concat_expand_escape(&output.text, str)) goto label
 
-	void *data = NULL;                                                     // response data
-	enum MHD_ResponseMemoryMode data_memory_mode = MHD_RESPMEM_PERSISTENT; // what mhd should do with the data
-	size_t size = 0;                                                       // size of the response data
+	struct output_data output = {
+	        .data = NULL,                          // response data
+	        .data_memory = MHD_RESPMEM_PERSISTENT, // what mhd should do with the data
+	        .size = 0,                             // size of the response data
+	        .status = MHD_HTTP_OK,                 // response status
+	        .content_type = NULL,                  // response content type
+	        .result_file = NULL                    // used for logging
+	};
 
-	unsigned int status = MHD_HTTP_OK;  // response status
-	char *content_type = NULL;          // response content type
 	cJSON *root = cJSON_CreateObject(); // for responding with JSON data
-	char *result_file = NULL;           // used for logging
 	bool not_found = false;             // for custom 404 page
 	bool root_path = true;
 
 	// get accept content type
-	const char *accept_type = MHD_lookup_connection_value(connection, MHD_HEADER_KIND, MHD_HTTP_HEADER_ACCEPT);
-	enum output_mode output_mode = get_output_mode(accept_type); // response content type enum
+	enum output_mode output_mode = get_output_mode(connection); // response content type enum
 
 	struct httpd_data *cls = (struct httpd_data *) cls_;
 
 	if (strcmp(method, MHD_HTTP_METHOD_GET) != 0) {
-		status = MHD_HTTP_METHOD_NOT_ALLOWED;
+		output.status = MHD_HTTP_METHOD_NOT_ALLOWED;
 		goto respond;
 	}
 
@@ -361,35 +387,31 @@ enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connecti
 serve_file:
 	if (file.fp) {
 		//TODO
-		/*
-		result_file = filepath;
-		output_mode = OUT_NONE;
-		data = "test";
-		size = 4;
-		*/
-		status = MHD_HTTP_NOT_IMPLEMENTED;
+		output.result_file = filepath;
+		//if (!get_file_cache(filepath, &file)) goto not_found;
+		output.status = MHD_HTTP_OK;
 		goto respond;
 	} else if (file.dir) {
-		if (not_found) goto not_found; // custom 404 page doesn't support directory listing
+		if (not_found) goto not_found;              // custom 404 page doesn't support directory listing
 		if (!cls->list_directories) goto not_found; // directory listing not allowed
-		result_file = filepath;
+		output.result_file = filepath;
 		cJSON *dir_array = NULL; // array of directory children
 		switch (output_mode) {
 			case OUT_NONE:
 			case OUT_TEXT:
 				output_mode = OUT_TEXT;
-				data_memory_mode = MHD_RESPMEM_MUST_FREE;
+				output.data_memory = MHD_RESPMEM_MUST_FREE;
 				append("Index of ", server_error);
 				append(url, server_error);
 				append("\n\n", server_error);
 				break;
 			case OUT_HTML:
-				data_memory_mode = MHD_RESPMEM_MUST_FREE;
+				output.data_memory = MHD_RESPMEM_MUST_FREE;
 				size_t title_len = strlen(url) + 32;
 				char *title = malloc(title_len);
 				if (!title) goto server_error;
 				snprintf(title, title_len, "Index of %s", url);
-				if (!construct_html_start(char_data, title, NULL)) goto server_error;
+				if (!construct_html_start(&output.text, title, NULL)) goto server_error;
 				free(title);
 				append("<ul>\n", server_error);
 				break;
@@ -405,7 +427,7 @@ serve_file:
 			// add parent directory link
 			struct file_detail parent_file = {.dir = NULL, .fp = NULL};
 			if (!open_file(filepath_parent, &parent_file, cls, true)) goto not_found;
-			res = add_dir_item(output_mode, char_data, parent_file, url_parent, "..", dir_array, "parent", "parent directory");
+			res = add_dir_item(output_mode, &output.text, parent_file, url_parent, "..", dir_array, "parent", "parent directory");
 			if (!res) {
 				close_file(&parent_file);
 				goto server_error;
@@ -429,7 +451,7 @@ serve_file:
 			memcpy(child_url, url, PATH_MAX);
 			if (!join_url_path(child_url, PATH_MAX, child_name)) continue;
 
-			res = add_dir_item(output_mode, char_data, child_file, child_url, child_name, dir_array, "child", NULL);
+			res = add_dir_item(output_mode, &output.text, child_file, child_url, child_name, dir_array, "child", NULL);
 
 			close_file(&child_file);
 			if (res)
@@ -440,13 +462,12 @@ serve_file:
 
 		if (output_mode == OUT_HTML) {
 			append("</ul>", server_error);
-			if (!construct_html_end(char_data)) goto server_error;
+			if (!construct_html_end(&output.text)) goto server_error;
 		}
 
 		if (output_mode != OUT_JSON) {
 			append("\n", server_error);
-			size = strlen(*char_data);
-			data = *char_data;
+			output.size = strlen(output.text);
 		}
 
 		close_file(&file);
@@ -456,7 +477,7 @@ serve_file:
 
 not_found:
 	close_file(&file);
-	status = MHD_HTTP_NOT_FOUND;
+	output.status = MHD_HTTP_NOT_FOUND;
 	if (not_found) {
 		eprintf("Error reading 404 file: %s\n", cls->not_found_file);
 	} else if (cls->not_found_file) {
@@ -467,99 +488,97 @@ not_found:
 	}
 	goto respond;
 server_error:
-	status = MHD_HTTP_INTERNAL_SERVER_ERROR;
+	output.status = MHD_HTTP_INTERNAL_SERVER_ERROR;
 	goto respond;
 too_long:
-	status = MHD_HTTP_URI_TOO_LONG;
+	output.status = MHD_HTTP_URI_TOO_LONG;
 	goto respond;
 bad_request:
-	status = MHD_HTTP_BAD_REQUEST;
+	output.status = MHD_HTTP_BAD_REQUEST;
 	goto respond;
 respond:;
 	close_file(&file);
 	struct MHD_Response *response;
 
-	if (!data) { // if there is no data to respond with
-		size = 0;
+	if (!output.data) { // if there is no data to respond with
+		output.size = 0;
 
-		if (status != MHD_HTTP_NO_CONTENT) {
-			char *status_name = status_codes[status];
+		if (output.status != MHD_HTTP_NO_CONTENT) {
+			char *status_name = status_codes[output.status];
 
 			size_t full_status_str_len = strlen(status_name) + 32;
 			char full_status_str[full_status_str_len];
-			snprintf(full_status_str, full_status_str_len, "%i - %s", status, status_name);
-
-			bool is_error = status >= 400;
+			snprintf(full_status_str, full_status_str_len, "%i - %s", output.status, status_name);
 
 			// write out status code
 			switch (output_mode) {
 				case OUT_NONE:
 				case OUT_TEXT:
 					output_mode = OUT_TEXT;
-					data_memory_mode = MHD_RESPMEM_MUST_FREE;
+					output.data_memory = MHD_RESPMEM_MUST_FREE;
 					append(full_status_str, server_error);
 					append("\n", server_error);
 					break;
 				case OUT_HTML:
-					data_memory_mode = MHD_RESPMEM_MUST_FREE;
-					if (!construct_html_start(char_data, full_status_str, "error")) goto server_error;
+					output.data_memory = MHD_RESPMEM_MUST_FREE;
+					if (!construct_html_start(&output.text, full_status_str, "error")) goto server_error;
 					append("<p><a class=\"main-page\" href=\"/\">Main Page</a></p>\n", server_error);
-					if (!construct_html_end(char_data)) goto server_error;
+					if (!construct_html_end(&output.text)) goto server_error;
 					break;
 				case OUT_JSON:;
 					// set status code in JSON
 					cJSON *status_obj = cJSON_CreateObject();
-					cJSON_AddNumberToObject(status_obj, "number", status);
+					cJSON_AddNumberToObject(status_obj, "number", output.status);
 					cJSON_AddStringToObject(status_obj, "message", status_name);
-					cJSON_AddBoolToObject(status_obj, "ok", !is_error);
+					cJSON_AddBoolToObject(status_obj, "ok", output.status < 400);
 					cJSON_AddItemToObject(root, "status", status_obj);
 
 					// encode JSON data and respond with it
-					data = cJSON_Print(root);
+					output.data = cJSON_Print(root);
 					append("\n", server_error);
-					data_memory_mode = MHD_RESPMEM_MUST_FREE; // free the data after responding
+					output.data_memory = MHD_RESPMEM_MUST_FREE; // free the data after responding
 					break;
 			}
 
-			if (data) size = strlen(data);
+			if (output.data) output.size = strlen(output.data);
 		}
 	}
 
-	if (!content_type) {
+	if (!output.content_type) {
 		// set content type accordingly
 		switch (output_mode) {
 			case OUT_NONE:
 				break;
 			case OUT_TEXT:
-				content_type = "text/plain";
+				output.content_type = "text/plain";
 				break;
 			case OUT_HTML:
-				content_type = "text/html";
+				output.content_type = "text/html";
 				break;
 			case OUT_JSON:
-				content_type = "application/json";
+				output.content_type = "application/json";
 				break;
 		}
 	}
 
-	response = MHD_create_response_from_buffer(size, data, data_memory_mode);
-	MHD_add_response_header(response, MHD_HTTP_HEADER_CONTENT_TYPE, content_type);
-	int ret = MHD_queue_response(connection, status, response);
+	response = MHD_create_response_from_buffer(output.size, output.data, output.data_memory);
+	if (output.content_type) MHD_add_response_header(response, MHD_HTTP_HEADER_CONTENT_TYPE, output.content_type);
+	int ret = MHD_queue_response(connection, output.status, response);
 	MHD_destroy_response(response);
 
 	if (!cls->quiet) {
 		struct sockaddr *addr = MHD_get_connection_info(connection, MHD_CONNECTION_INFO_CLIENT_ADDRESS)->client_addr;
 		char *ip = sockaddr_to_string(addr);
-		char *size_str = format_bytes(size, binary_i);
+		char *size_str = format_bytes(output.size, binary_i);
 		// log the request and response
 		printf(
 		        "Request: %s%s%s %s\n"
 		        "Response: %i, %s%s%s%s%s\n",
 		        ip ? ip : "", ip ? ", " : "",
 		        method, url,
-		        status,
-		        content_type ? content_type : "", content_type ? ", " : "",
-		        result_file ? result_file : "", result_file ? ", " : "",
+		        output.status,
+		        output.content_type ? output.content_type : "", output.content_type ? ", " : "",
+		        output.result_file ? output.result_file : "", output.result_file ? ", " : "",
 		        size_str);
 		// all in one printf call to prevent interleaving of output from multiple threads
 		free(ip);
