@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <microhttpd.h>
 
-struct httpd_data {
+struct server_config {
 	char *base_file;
 	char *not_found_file;
 	bool dotfiles;

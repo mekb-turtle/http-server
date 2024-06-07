@@ -41,7 +41,7 @@ int main(int argc, char *argv[]) {
 	uint16_t port;
 	bool port_set = false;
 
-	struct httpd_data data;
+	struct server_config data;
 	memset(&data, 0, sizeof(data));
 	data.show_server_info = true;
 
