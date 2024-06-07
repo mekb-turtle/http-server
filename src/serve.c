@@ -13,6 +13,7 @@
 #include "util.h"
 #include "format_bytes.h"
 #include "status_code.h"
+#include "file_cache.h"
 
 #define eprintf(...) fprintf(stderr, __VA_ARGS__)
 
@@ -33,6 +34,18 @@ static char *sockaddr_to_string(struct sockaddr *addr) {
 			}
 		}
 	return NULL;
+}
+
+static bool get_is_download(struct MHD_Connection *connection) {
+	const char *download = MHD_lookup_connection_value(connection, MHD_GET_ARGUMENT_KIND, "download");
+	if (download) {
+		if (download[0] == '\0') return false;
+		if (strcmp(download, "0") == 0) return false;
+		if (strcmp(download, "false") == 0) return false;
+		if (strcmp(download, "no") == 0) return false;
+		return true;
+	}
+	return false;
 }
 
 static enum response_type {
@@ -77,13 +90,7 @@ static enum response_type {
 	return OUT_NONE;
 }
 
-struct file_detail {
-	struct stat stat;
-	DIR *dir;
-	FILE *fp;
-};
-
-static void close_file(struct file_detail *file_detail) {
+void close_file(struct file_detail *file_detail) {
 	if (file_detail->dir) {
 		closedir(file_detail->dir);
 		file_detail->dir = NULL;
@@ -94,7 +101,7 @@ static void close_file(struct file_detail *file_detail) {
 	}
 }
 
-static bool open_file(
+bool open_file(
         char *filepath,
         struct file_detail *out,
         const struct server_config *cls,
@@ -175,19 +182,22 @@ static bool valid_filename(const char *name, const struct server_config *cls) {
 	return valid_filename_n(name, strlen(name), cls);
 }
 
-static bool add_cjson_file(cJSON *obj, struct file_detail st, char *url, char *name) {
-	if (url) cJSON_AddStringToObject(obj, "url", url);
-	if (name) cJSON_AddStringToObject(obj, "name", name);
+static bool add_cjson_file(cJSON *obj, struct file_detail st, char *url, char *name, struct file_cache_item *file_data) {
 	if (st.dir) {
 		cJSON_AddStringToObject(obj, "type", "directory");
 	} else if (st.fp) {
 		cJSON_AddStringToObject(obj, "type", "file");
-	} else {
+		if (file_data) {
+			cJSON_AddNumberToObject(obj, "size", file_data->size);
+			cJSON_AddStringToObject(obj, "mime", file_data->mime_type);
+			cJSON_AddBoolToObject(obj, "binary", file_data->is_binary);
+		} else {
+			cJSON_AddNumberToObject(obj, "size", st.stat.st_size);
+		}
+	} else
 		return false;
-	}
-	if (st.fp) {
-		cJSON_AddNumberToObject(obj, "size", st.stat.st_size);
-	}
+	if (url) cJSON_AddStringToObject(obj, "url", url);
+	if (name) cJSON_AddStringToObject(obj, "name", name);
 	return true;
 }
 
@@ -205,7 +215,7 @@ static bool WARN_UNUSED construct_html_start(char **base, char *title, char *tit
 	if (!concat_expand_escape(base, title)) return false;
 	if (!concat_expand(base, "</title></head>\n<body><h1 class=\"main-title")) return false;
 	if (title_class && title_class[0] != '\0') {
-		if (!concat_expand(base, " ")) return false;
+		if (!concat_expand_char(base, ' ')) return false;
 		if (!concat_expand_escape(base, title_class)) return false;
 	}
 	if (!concat_expand(base, "\">")) return false;
@@ -272,7 +282,7 @@ static bool add_dir_item(enum response_type response_type, char **data, struct f
 			break;
 		case OUT_JSON:;
 			cJSON *obj = cJSON_CreateObject();
-			add_cjson_file(obj, file, url, name);
+			add_cjson_file(obj, file, url, name, NULL);
 			cJSON_AddItemToArray(dir_array, obj);
 			break;
 	}
@@ -293,6 +303,7 @@ struct output_data {
 	size_t size;
 	unsigned int status;
 	char *content_type;
+	cJSON *json_root;
 };
 
 struct input_data {
@@ -303,7 +314,7 @@ struct input_data {
 	char *filepath_parent;
 	bool is_root_url;
 	enum response_type response_type;
-	cJSON *json_root;
+	bool is_download;
 };
 
 #define append(str, label) \
@@ -313,8 +324,43 @@ struct input_data {
 
 static bool serve_file(const struct server_config *cls, struct input_data *input, struct output_data *output) {
 	if (!input->file.fp) return false;
-	//if (!get_file_cache(filepath, &file)) goto not_found;
-	output->status = MHD_HTTP_NOT_IMPLEMENTED;
+	struct file_cache_item file;
+	enum cache_result result = get_file_cached(input->filepath, &input->file, &file);
+	switch (result) {
+		case cache_fatal_error:
+			goto server_error;
+		case cache_file_not_found:
+			return false;
+		default:
+	}
+	// currently segfaults, TODO: fix
+	switch (input->response_type) {
+		case OUT_NONE:
+		case OUT_TEXT:
+			input->response_type = OUT_NONE;
+			output->data = file.data;
+			output->size = file.size;
+			output->content_type = file.mime_type; // TODO: set charset parameter
+			break;
+		case OUT_HTML:
+			output->data_memory = MHD_RESPMEM_MUST_FREE;
+			if (!construct_html_start(&output->text, input->url, NULL)) goto server_error;
+			append("<p><a href=\"", server_error);
+			append_escape(input->url_parent, server_error);
+			append("\">Back</a> - <a href=\"", server_error);
+			append_escape(input->url, server_error);
+			append("\"></a></p>\n", server_error);
+			if (!construct_html_end(&output->text)) goto server_error;
+			output->size = strlen(output->text);
+			break;
+		case OUT_JSON:;
+			add_cjson_file(output->json_root, input->file, input->url, NULL, &file);
+			break;
+	}
+	return true;
+server_error:
+	if (output->data && output->data != file.data) free(output->data); // free the data if it was allocated
+	output->status = MHD_HTTP_INTERNAL_SERVER_ERROR;
 	return true;
 }
 
@@ -326,13 +372,11 @@ static bool serve_directory(const struct server_config *cls, struct input_data *
 		case OUT_NONE:
 		case OUT_TEXT:
 			input->response_type = OUT_TEXT;
-			output->data_memory = MHD_RESPMEM_MUST_FREE;
 			append("Index of ", server_error);
 			append(input->url, server_error);
 			append("\n\n", server_error);
 			break;
 		case OUT_HTML:
-			output->data_memory = MHD_RESPMEM_MUST_FREE;
 			size_t title_len = strlen(input->url) + 32;
 			char *title = malloc(title_len);
 			if (!title) goto server_error;
@@ -343,8 +387,8 @@ static bool serve_directory(const struct server_config *cls, struct input_data *
 			break;
 		case OUT_JSON:
 			dir_array = cJSON_CreateArray();
-			cJSON_AddItemToObject(input->json_root, "children", dir_array);
-			add_cjson_file(input->json_root, input->file, input->url, NULL);
+			cJSON_AddItemToObject(output->json_root, "children", dir_array);
+			add_cjson_file(output->json_root, input->file, input->url, NULL, NULL);
 			break;
 	}
 
@@ -394,6 +438,7 @@ static bool serve_directory(const struct server_config *cls, struct input_data *
 
 	if (input->response_type != OUT_JSON) {
 		append("\n", server_error);
+		output->data_memory = MHD_RESPMEM_MUST_FREE;
 		output->size = strlen(output->text);
 	}
 	return true;
@@ -427,14 +472,17 @@ enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connecti
 	        .size = 0,                             // size of the response data
 	        .status = MHD_HTTP_OK,                 // response status
 	        .content_type = NULL,                  // response content type
+	        .json_root = cJSON_CreateObject(),     // for responding with JSON data
 	};
 
 	struct input_data input = {
 	        .file = {.fp = NULL, .dir = NULL}, // file details
 	        .is_root_url = true,
-	        .json_root = cJSON_CreateObject(), // for responding with JSON data
-	        .response_type = get_response_type(connection)  // response content type enum
+	        .response_type = get_response_type(connection), // response content type enum
+	        .is_download = get_is_download(connection)  // if the file should be downloaded by the browser
 	};
+
+	if (input.is_download) input.response_type = OUT_NONE; // force raw output for downloads
 
 	bool not_found = false;    // for custom 404 page
 	bool server_error = false; // for server error
@@ -571,10 +619,11 @@ respond:;
 					cJSON_AddNumberToObject(status_obj, "number", output.status);
 					cJSON_AddStringToObject(status_obj, "message", status_name);
 					cJSON_AddBoolToObject(status_obj, "ok", !is_error);
-					cJSON_AddItemToObject(input.json_root, "status", status_obj);
+					cJSON_AddItemToObject(output.json_root, "status", status_obj);
 
 					// encode JSON data and respond with it
-					output.data = cJSON_Print(input.json_root);
+					output.data = cJSON_Print(output.json_root);
+					if (!output.data) goto server_error;
 					append("\n", server_error);
 					break;
 			}
@@ -583,24 +632,35 @@ respond:;
 		}
 	}
 
+	char *download_extension = NULL;
+
 	if (!output.content_type) {
 		// set content type accordingly
 		switch (input.response_type) {
 			case OUT_NONE:
 				break;
 			case OUT_TEXT:
+				download_extension = "txt";
 				output.content_type = "text/plain";
 				break;
 			case OUT_HTML:
+				download_extension = "html";
 				output.content_type = "text/html";
 				break;
 			case OUT_JSON:
+				download_extension = "json";
 				output.content_type = "application/json";
 				break;
 		}
 	}
 
-	response = MHD_create_response_from_buffer(output.size, output.data, output.data_memory);
+	if (output.data_memory == MHD_RESPMEM_MUST_FREE)
+		response = MHD_create_response_from_buffer_with_free_callback(output.size, output.data, &free); // helps with portability
+	else
+		response = MHD_create_response_from_buffer(output.size, output.data, output.data_memory);
+	if (input.is_download) {
+		MHD_add_response_header(response, MHD_HTTP_HEADER_CONTENT_DISPOSITION, "attachment"); // TODO: set filename + download_extension
+	}
 	if (output.content_type) MHD_add_response_header(response, MHD_HTTP_HEADER_CONTENT_TYPE, output.content_type);
 	int ret = MHD_queue_response(connection, output.status, response);
 	MHD_destroy_response(response);
@@ -609,20 +669,36 @@ respond:;
 		struct sockaddr *addr = MHD_get_connection_info(connection, MHD_CONNECTION_INFO_CLIENT_ADDRESS)->client_addr;
 		char *ip = sockaddr_to_string(addr);
 		char *size_str = format_bytes(output.size, binary_i);
+		char *response_type_str = NULL;
+		switch (input.response_type) {
+			case OUT_NONE:
+				response_type_str = "Raw";
+				break;
+			case OUT_TEXT:
+				response_type_str = "Text";
+				break;
+			case OUT_HTML:
+				response_type_str = "HTML";
+				break;
+			case OUT_JSON:
+				response_type_str = "JSON";
+				break;
+		}
 		// log the request and response
 		printf(
 		        "Request: %s%s%s %s\n"
-		        "Response: %i, %s%s%s%s%s\n",
+		        "Response: %i %s, %s%sType: %s, %s%s%s\n",
 		        ip ? ip : "", ip ? ", " : "",
 		        method, input.url,
-		        output.status,
+		        output.status, status_codes[output.status],
 		        output.content_type ? output.content_type : "", output.content_type ? ", " : "",
+		        response_type_str,
 		        input.filepath ? input.filepath : "", input.filepath ? ", " : "",
 		        size_str);
 		// all in one printf call to prevent interleaving of output from multiple threads
 		free(ip);
 		free(size_str);
 	}
-	cJSON_Delete(input.json_root);
+	cJSON_Delete(output.json_root);
 	return ret;
 }

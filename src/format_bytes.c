@@ -23,7 +23,7 @@ char *format_bytes(size_t byte, enum format_bytes_mode mode) {
 			base = 1024;
 			break;
 		default:
-			break;
+			return NULL;
 	}
 
 	size_t power = 1;
