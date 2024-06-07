@@ -1,3 +1,4 @@
+#include "status_code.h"
 // see /usr/include/microhttpd.h
 char *status_codes[] = {
         [100] = "Continue",
@@ -62,3 +63,25 @@ char *status_codes[] = {
         [508] = "Loop Detected",
         [510] = "Not Extended",
         [511] = "Network Authentication Required"};
+
+bool http_status_is_info(unsigned int status_code) {
+	return status_code >= 100 && status_code < 200;
+}
+bool http_status_is_success(unsigned int status_code) {
+	return status_code >= 200 && status_code < 300;
+}
+bool http_status_is_redirect(unsigned int status_code) {
+	return status_code >= 300 && status_code < 400;
+}
+bool http_status_is_client_error(unsigned int status_code) {
+	return status_code >= 400 && status_code < 500;
+}
+bool http_status_is_server_error(unsigned int status_code) {
+	return status_code >= 500 && status_code < 600;
+}
+bool http_status_is_error(unsigned int status_code) {
+	return http_status_is_client_error(status_code) || http_status_is_server_error(status_code);
+}
+bool http_status_is_ok(unsigned int status_code) {
+	return !http_status_is_error(status_code);
+}

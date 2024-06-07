@@ -510,6 +510,8 @@ respond:;
 			char full_status_str[full_status_str_len];
 			snprintf(full_status_str, full_status_str_len, "%i - %s", output.status, status_name);
 
+			bool is_error = http_status_is_error(output.status);
+
 			// write out status code
 			switch (output_mode) {
 				case OUT_NONE:
@@ -521,7 +523,7 @@ respond:;
 					break;
 				case OUT_HTML:
 					output.data_memory = MHD_RESPMEM_MUST_FREE;
-					if (!construct_html_start(&output.text, full_status_str, "error")) goto server_error;
+					if (!construct_html_start(&output.text, full_status_str, is_error ? "error" : "ok")) goto server_error;
 					append("<p><a class=\"main-page\" href=\"/\">Main Page</a></p>\n", server_error);
 					if (!construct_html_end(&output.text)) goto server_error;
 					break;
@@ -530,7 +532,7 @@ respond:;
 					cJSON *status_obj = cJSON_CreateObject();
 					cJSON_AddNumberToObject(status_obj, "number", output.status);
 					cJSON_AddStringToObject(status_obj, "message", status_name);
-					cJSON_AddBoolToObject(status_obj, "ok", output.status < 400);
+					cJSON_AddBoolToObject(status_obj, "ok", !is_error);
 					cJSON_AddItemToObject(root, "status", status_obj);
 
 					// encode JSON data and respond with it
