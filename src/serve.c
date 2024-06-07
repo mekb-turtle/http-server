@@ -97,7 +97,7 @@ static void close_file(struct file_detail *file_detail) {
 static bool open_file(
         char *filepath,
         struct file_detail *out,
-        struct server_config *cls,
+        const struct server_config *cls,
         bool open) {
 	struct file_detail st_;
 	if (!out) {
@@ -153,7 +153,7 @@ no_file:
 	return false;
 }
 
-static bool valid_filename_n(const char *name, size_t len, struct server_config *cls) {
+static bool valid_filename_n(const char *name, size_t len, const struct server_config *cls) {
 	if (len > 0 && name[0] == '.') {
 		if (!cls->dotfiles)
 			return false; // skip dotfiles
@@ -171,7 +171,7 @@ static bool valid_filename_n(const char *name, size_t len, struct server_config 
 	return true;
 }
 
-static bool valid_filename(const char *name, struct server_config *cls) {
+static bool valid_filename(const char *name, const struct server_config *cls) {
 	return valid_filename_n(name, strlen(name), cls);
 }
 
@@ -311,14 +311,14 @@ struct input_data {
 #define append_escape(str, label) \
 	if (!concat_expand_escape(&output->text, str)) goto label
 
-static bool serve_file(struct server_config *cls, struct input_data *input, struct output_data *output) {
+static bool serve_file(const struct server_config *cls, struct input_data *input, struct output_data *output) {
 	if (!input->file.fp) return false;
 	//if (!get_file_cache(filepath, &file)) goto not_found;
 	output->status = MHD_HTTP_NOT_IMPLEMENTED;
 	return true;
 }
 
-static bool serve_directory(struct server_config *cls, struct input_data *input, struct output_data *output) {
+static bool serve_directory(const struct server_config *cls, struct input_data *input, struct output_data *output) {
 	if (!input->file.dir) return false;
 	if (!cls->list_directories) false; // directory listing not allowed
 	cJSON *dir_array = NULL;           // array of directory children
@@ -440,7 +440,7 @@ enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connecti
 	bool server_error = false; // for server error
 
 	// get server config data
-	struct server_config *cls = (struct server_config *) cls_;
+	const struct server_config *cls = (const struct server_config *) cls_;
 
 	if (strcmp(method, MHD_HTTP_METHOD_GET) != 0) {
 		output.status = MHD_HTTP_METHOD_NOT_ALLOWED;
