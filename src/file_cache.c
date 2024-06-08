@@ -40,5 +40,7 @@ enum cache_result get_file_cached(char *filepath, struct file_detail *file, stru
 		*out = *(struct file_cache_item *) entry->value;
 		return cache_hit;
 	}
+
+	// TODO: read file into memory
 	return cache_miss;
 }

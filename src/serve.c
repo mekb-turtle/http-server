@@ -9,11 +9,13 @@
 #include <sys/stat.h>
 
 #include <arpa/inet.h>
-#include <cjson/cJSON.h>
 #include "util.h"
 #include "format_bytes.h"
 #include "status_code.h"
-#include "file_cache.h"
+
+#include "serve_file.h"
+#include "serve_directory.h"
+#include "serve_result.h"
 
 #define eprintf(...) fprintf(stderr, __VA_ARGS__)
 
@@ -48,12 +50,7 @@ static bool get_is_download(struct MHD_Connection *connection) {
 	return false;
 }
 
-static enum response_type {
-	OUT_NONE,
-	OUT_TEXT,
-	OUT_HTML,
-	OUT_JSON
-} get_response_type(struct MHD_Connection *connection) {
+static enum response_type get_response_type(struct MHD_Connection *connection) {
 	// get ?output query parameter
 	const char *output = MHD_lookup_connection_value(connection, MHD_GET_ARGUMENT_KIND, "output");
 	if (output) {
@@ -160,7 +157,7 @@ no_file:
 	return false;
 }
 
-static bool valid_filename_n(const char *name, size_t len, const struct server_config *cls) {
+bool valid_filename_n(const char *name, size_t len, const struct server_config *cls) {
 	if (len > 0 && name[0] == '.') {
 		if (!cls->dotfiles)
 			return false; // skip dotfiles
@@ -178,11 +175,11 @@ static bool valid_filename_n(const char *name, size_t len, const struct server_c
 	return true;
 }
 
-static bool valid_filename(const char *name, const struct server_config *cls) {
+bool valid_filename(const char *name, const struct server_config *cls) {
 	return valid_filename_n(name, strlen(name), cls);
 }
 
-static bool add_cjson_file(cJSON *obj, struct file_detail st, char *url, char *name, struct file_cache_item *file_data) {
+bool cjson_add_file_details(cJSON *obj, struct file_detail st, char *url, char *name, struct file_cache_item *file_data) {
 	if (st.dir) {
 		cJSON_AddStringToObject(obj, "type", "directory");
 	} else if (st.fp) {
@@ -204,257 +201,43 @@ static bool add_cjson_file(cJSON *obj, struct file_detail st, char *url, char *n
 extern const char binary_site_css[];
 extern size_t binary_site_css_len;
 
-static bool WARN_UNUSED construct_html_start(char **base, char *title, char *title_class) {
+// TODO: use a template engine for this
+
+bool WARN_UNUSED construct_html_head(char **base) {
 	if (!concat_expand(base, "<html>\n<head>"
 	                         "<meta charset=\"utf-8\">"
 	                         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">")) return false;
 	if (!concat_expand(base, "<style>")) return false;
 	if (!concat_expand_n(base, binary_site_css, binary_site_css_len)) return false;
 	if (!concat_expand(base, "</style>")) return false;
-	if (!concat_expand(base, "<title>")) return false;
-	if (!concat_expand_escape(base, title)) return false;
-	if (!concat_expand(base, "</title></head>\n<body><h1 class=\"main-title")) return false;
+	return true;
+}
+
+bool WARN_UNUSED construct_html_body(char **base, char *title_class) {
+	if (!concat_expand(base, "</head>\n<body><h1 class=\"main-title")) return false;
 	if (title_class && title_class[0] != '\0') {
 		if (!concat_expand_char(base, ' ')) return false;
 		if (!concat_expand_escape(base, title_class)) return false;
 	}
 	if (!concat_expand(base, "\">")) return false;
-	if (!concat_expand_escape(base, title)) return false;
-	if (!concat_expand(base, "</h1><hr/><div class=\"main\">\n")) return false;
 	return true;
 }
 
-static bool WARN_UNUSED construct_html_end(char **base) {
+bool WARN_UNUSED construct_html_main(char **base) {
+	return concat_expand(base, "</h1><hr/><div class=\"main\">\n");
+}
+
+bool WARN_UNUSED construct_html_end(char **base) {
 	return concat_expand(base, "\n</div><hr/></body></html>");
 }
 
-static bool add_dir_item(enum response_type response_type, char **data, struct file_detail file, char *url, char *name, cJSON *dir_array, char *class, char *custom_type) {
-	off_t size = file.stat.st_size;
-	char size_str[32];
-	snprintf(size_str, 32, "%li", size);
-	char *size_format = format_bytes(size, binary_i);
-
-	switch (response_type) {
-		case OUT_NONE:
-		case OUT_TEXT:
-			if (!concat_expand(data, "- ")) goto error;
-			if (!concat_expand(data, name)) goto error;
-			if (!concat_expand(data, " - ")) goto error;
-			if (file.dir) {
-				if (!concat_expand(data, "directory")) goto error;
-			} else if (file.fp) {
-				if (!concat_expand(data, "file - ")) goto error;
-				if (!concat_expand(data, size_format)) goto error;
-			}
-			if (!concat_expand(data, "\n")) goto error;
-			break;
-		case OUT_HTML:
-			if (!concat_expand(data, "<li class=\"file-item")) goto error;
-			if (class && class[0] != '\0') {
-				if (!concat_expand(data, " ")) return false;
-				if (!concat_expand_escape(data, class)) return false;
-			}
-			if (!concat_expand(data, "\"><a href=\"")) return false;
-			if (!concat_expand_escape(data, url)) goto error;
-			if (!concat_expand(data, "\" title=\"")) goto error;
-			if (!concat_expand_escape(data, url)) goto error;
-			if (!concat_expand(data, "\">")) goto error;
-			if (!concat_expand_escape(data, name)) goto error;
-			if (!concat_expand(data, "</a>")) goto error;
-			if (!concat_expand(data, " - <span class=\"file-type\">")) goto error;
-			if (!custom_type) {
-				if (file.dir) custom_type = "directory";
-				else if (file.fp)
-					custom_type = "file";
-				else
-					custom_type = "unknown";
-			}
-			if (!concat_expand_escape(data, custom_type)) goto error;
-			if (!concat_expand(data, "</span>")) goto error;
-			if (file.fp) {
-				if (!concat_expand(data, " - <span class=\"file-size\" title=\"")) goto error;
-				if (!concat_expand_escape(data, size_str)) goto error;
-				if (!concat_expand(data, " bytes\">")) goto error;
-				if (!concat_expand_escape(data, size_format)) goto error;
-				if (!concat_expand(data, "</span>")) goto error;
-			}
-			if (!concat_expand(data, "</li>\n")) goto error;
-			break;
-		case OUT_JSON:;
-			cJSON *obj = cJSON_CreateObject();
-			add_cjson_file(obj, file, url, name, NULL);
-			cJSON_AddItemToArray(dir_array, obj);
-			break;
-	}
-
-	free(size_format);
-	return true;
-error:
-	free(size_format);
-	return false;
-}
-
-struct output_data {
-	union {
-		void *data;
-		char *text;
-	};
-	enum MHD_ResponseMemoryMode data_memory;
-	size_t size;
-	unsigned int status;
-	char *content_type;
-	cJSON *json_root;
-};
-
-struct input_data {
-	struct file_detail file;
-	char *url;
-	char *url_parent;
-	char *filepath;
-	char *filepath_parent;
-	bool is_root_url;
-	enum response_type response_type;
-	bool is_download;
-};
-
-#define append(str, label) \
-	if (!concat_expand(&output->text, str)) goto label
-#define append_escape(str, label) \
-	if (!concat_expand_escape(&output->text, str)) goto label
-
-static bool serve_file(const struct server_config *cls, struct input_data *input, struct output_data *output) {
-	if (!input->file.fp) return false;
-	struct file_cache_item file;
-	enum cache_result result = get_file_cached(input->filepath, &input->file, &file);
-	switch (result) {
-		case cache_fatal_error:
-			goto server_error;
-		case cache_file_not_found:
-			return false;
-		default:
-	}
-	// currently segfaults, TODO: fix
-	switch (input->response_type) {
-		case OUT_NONE:
-		case OUT_TEXT:
-			input->response_type = OUT_NONE;
-			output->data = file.data;
-			output->size = file.size;
-			output->content_type = file.mime_type; // TODO: set charset parameter
-			break;
-		case OUT_HTML:
-			output->data_memory = MHD_RESPMEM_MUST_FREE;
-			if (!construct_html_start(&output->text, input->url, NULL)) goto server_error;
-			append("<p><a href=\"", server_error);
-			append_escape(input->url_parent, server_error);
-			append("\">Back</a> - <a href=\"", server_error);
-			append_escape(input->url, server_error);
-			append("\"></a></p>\n", server_error);
-			if (!construct_html_end(&output->text)) goto server_error;
-			output->size = strlen(output->text);
-			break;
-		case OUT_JSON:;
-			add_cjson_file(output->json_root, input->file, input->url, NULL, &file);
-			break;
-	}
-	return true;
-server_error:
-	if (output->data && output->data != file.data) free(output->data); // free the data if it was allocated
-	output->status = MHD_HTTP_INTERNAL_SERVER_ERROR;
-	return true;
-}
-
-static bool serve_directory(const struct server_config *cls, struct input_data *input, struct output_data *output) {
-	if (!input->file.dir) return false;
-	if (!cls->list_directories) false; // directory listing not allowed
-	cJSON *dir_array = NULL;           // array of directory children
-	switch (input->response_type) {
-		case OUT_NONE:
-		case OUT_TEXT:
-			input->response_type = OUT_TEXT;
-			append("Index of ", server_error);
-			append(input->url, server_error);
-			append("\n\n", server_error);
-			break;
-		case OUT_HTML:
-			size_t title_len = strlen(input->url) + 32;
-			char *title = malloc(title_len);
-			if (!title) goto server_error;
-			snprintf(title, title_len, "Index of %s", input->url);
-			if (!construct_html_start(&output->text, title, NULL)) goto server_error;
-			free(title);
-			append("<ul>\n", server_error);
-			break;
-		case OUT_JSON:
-			dir_array = cJSON_CreateArray();
-			cJSON_AddItemToObject(output->json_root, "children", dir_array);
-			add_cjson_file(output->json_root, input->file, input->url, NULL, NULL);
-			break;
-	}
-
-	bool res;
-	if (!input->is_root_url) {
-		// add parent directory link
-		struct file_detail parent_file = {.dir = NULL, .fp = NULL};
-		if (open_file(input->filepath_parent, &parent_file, cls, true)) {
-			res = add_dir_item(input->response_type, &output->text, parent_file, input->url_parent, "..", dir_array, "parent", "parent directory");
-			if (!res) {
-				close_file(&parent_file);
-				goto server_error;
-			}
-		}
-	}
-
-	struct dirent *entry;
-	while ((entry = readdir(input->file.dir))) {
-		char *child_name = entry->d_name;
-
-		if (!valid_filename(child_name, cls)) continue;
-
-		struct file_detail child_file = {.dir = NULL, .fp = NULL};
-
-		char child_filepath[PATH_MAX];
-		memcpy(child_filepath, input->filepath, PATH_MAX);
-		if (!join_filepath(child_filepath, PATH_MAX, child_name)) continue;
-		if (!open_file(child_filepath, &child_file, cls, true)) continue; // skip if cannot open file
-
-		char child_url[PATH_MAX];
-		memcpy(child_url, input->url, PATH_MAX);
-		if (!join_url_path(child_url, PATH_MAX, child_name)) continue;
-
-		res = add_dir_item(input->response_type, &output->text, child_file, child_url, child_name, dir_array, "child", NULL);
-
-		close_file(&child_file);
-		if (res)
-			continue;
-		else
-			goto server_error;
-	}
-
-	if (input->response_type == OUT_HTML) {
-		append("</ul>", server_error);
-		if (!construct_html_end(&output->text)) goto server_error;
-	}
-
-	if (input->response_type != OUT_JSON) {
-		append("\n", server_error);
-		output->data_memory = MHD_RESPMEM_MUST_FREE;
-		output->size = strlen(output->text);
-	}
-	return true;
-
-server_error:
-	return false;
-}
+#include "serve_file.h"
 
 static void ensure_path_slash(char *path, char slash) {
 	if (path[0] != '\0') return;
 	path[0] = slash;
 	path[1] = '\0';
 }
-
-#undef append
-#undef append_escape
 
 enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connection,
                                      const char *user_url,
@@ -473,19 +256,18 @@ enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connecti
 	        .status = MHD_HTTP_OK,                 // response status
 	        .content_type = NULL,                  // response content type
 	        .json_root = cJSON_CreateObject(),     // for responding with JSON data
+	        .response_type = get_response_type(connection), // response content type enum
 	};
 
 	struct input_data input = {
 	        .file = {.fp = NULL, .dir = NULL}, // file details
 	        .is_root_url = true,
-	        .response_type = get_response_type(connection), // response content type enum
 	        .is_download = get_is_download(connection)  // if the file should be downloaded by the browser
 	};
 
-	if (input.is_download) input.response_type = OUT_NONE; // force raw output for downloads
+	if (input.is_download) output.response_type = OUT_NONE; // force raw output for downloads
 
-	bool not_found = false;    // for custom 404 page
-	bool server_error = false; // for server error
+	bool not_found = false; // for custom 404 page
 
 	// get server config data
 	const struct server_config *cls = (const struct server_config *) cls_;
@@ -546,17 +328,23 @@ enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connecti
 	ensure_path_slash(input.filepath, PATH_SEPARATOR);
 	ensure_path_slash(input.filepath_parent, PATH_SEPARATOR);
 
-serve_file:
+serve_logic:;
+	enum serve_result result = not_found;
 	if (input.file.fp) {
-		if (!serve_file(cls, &input, &output)) goto not_found;
-		goto respond;
-	}
-	if (input.file.dir) {
+		result = serve_file(cls, &input, &output);
+	} else if (input.file.dir) {
 		if (not_found) goto not_found; // custom 404 page doesn't support directory listing
-		if (!serve_directory(cls, &input, &output)) goto not_found;
-		goto respond;
+		result = serve_directory(cls, &input, &output);
 	}
-	goto not_found; // unsupported file type
+	switch (result) {
+		case serve_not_found:
+			goto not_found;
+		case serve_ok:
+			goto respond;
+		case serve_error:
+		default:
+			goto server_error;
+	}
 
 not_found:
 	close_file(&input.file);
@@ -567,11 +355,10 @@ not_found:
 		not_found = true;
 		// resolve the file
 		if (!open_file(cls->not_found_file, &input.file, cls, true)) goto not_found;
-		goto serve_file;
+		goto serve_logic;
 	}
 	goto respond;
 server_error:
-	server_error = true;
 	output.status = MHD_HTTP_INTERNAL_SERVER_ERROR;
 	goto respond;
 too_long:
@@ -584,59 +371,24 @@ respond:;
 	close_file(&input.file);
 	struct MHD_Response *response;
 
-	if (!output.data) { // if there is no data to respond with
-		output.size = 0;
-
-		output.content_type = NULL;
-
-		if (output.status != MHD_HTTP_NO_CONTENT && !server_error) { // prevent infinite loop
-			char *status_name = status_codes[output.status];
-
-			size_t full_status_str_len = strlen(status_name) + 32;
-			char full_status_str[full_status_str_len];
-			snprintf(full_status_str, full_status_str_len, "%i - %s", output.status, status_name);
-
-			bool is_error = http_status_is_error(output.status);
-
-			output.data_memory = MHD_RESPMEM_MUST_FREE; // free the data after responding
-
-			// write out status code
-			switch (input.response_type) {
-				case OUT_NONE:
-				case OUT_TEXT:
-					input.response_type = OUT_TEXT;
-					append(full_status_str, server_error);
-					append("\n", server_error);
-					break;
-				case OUT_HTML:
-					if (!construct_html_start(&output.text, full_status_str, is_error ? "error" : "ok")) goto server_error;
-					append("<p><a class=\"main-page\" href=\"/\">Main Page</a></p>\n", server_error);
-					if (!construct_html_end(&output.text)) goto server_error;
-					break;
-				case OUT_JSON:;
-					// set status code in JSON
-					cJSON *status_obj = cJSON_CreateObject();
-					cJSON_AddNumberToObject(status_obj, "number", output.status);
-					cJSON_AddStringToObject(status_obj, "message", status_name);
-					cJSON_AddBoolToObject(status_obj, "ok", !is_error);
-					cJSON_AddItemToObject(output.json_root, "status", status_obj);
-
-					// encode JSON data and respond with it
-					output.data = cJSON_Print(output.json_root);
-					if (!output.data) goto server_error;
-					append("\n", server_error);
-					break;
-			}
-
-			if (output.data) output.size = strlen(output.data);
-		}
+	result = serve_result(cls, &input, &output);
+	switch (result) {
+		case serve_not_found:
+			output.status = MHD_HTTP_NOT_FOUND;
+			break;
+		case serve_error:
+			output.response_type = OUT_NONE; // force no content
+			output.status = MHD_HTTP_INTERNAL_SERVER_ERROR;
+			break;
+		case serve_ok:
+			break;
 	}
 
 	char *download_extension = NULL;
 
 	if (!output.content_type) {
 		// set content type accordingly
-		switch (input.response_type) {
+		switch (output.response_type) {
 			case OUT_NONE:
 				break;
 			case OUT_TEXT:
@@ -654,6 +406,7 @@ respond:;
 		}
 	}
 
+	if (!output.data) output.data_memory = MHD_RESPMEM_PERSISTENT; // no data to free
 	if (output.data_memory == MHD_RESPMEM_MUST_FREE)
 		response = MHD_create_response_from_buffer_with_free_callback(output.size, output.data, &free); // helps with portability
 	else
@@ -670,7 +423,7 @@ respond:;
 		char *ip = sockaddr_to_string(addr);
 		char *size_str = format_bytes(output.size, binary_i);
 		char *response_type_str = NULL;
-		switch (input.response_type) {
+		switch (output.response_type) {
 			case OUT_NONE:
 				response_type_str = "Raw";
 				break;
