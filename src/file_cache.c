@@ -25,7 +25,14 @@ static void free_value(void *value_) {
 	free(value);
 }
 
-enum cache_result get_file_cached(char *filepath, struct file_detail *file, struct file_cache_item *out) {
+enum cache_result get_file_cached(
+        struct file_detail *file,
+		struct file_cache_item *out,
+		bool fetch_new) {
+	if (!file) return cache_fatal_error;
+	if (!file->filepath) return cache_fatal_error;
+	if (file->cache) goto cache_hit;
+
 	static struct hashmap *cache_map = NULL;
 	if (!cache_map) {
 		// initialize the cache map
@@ -34,13 +41,18 @@ enum cache_result get_file_cached(char *filepath, struct file_detail *file, stru
 		if (!cache_map_.buckets) return cache_fatal_error;
 		cache_map = &cache_map_;
 	}
-	struct hashmap_entry *entry = hashmap_get(cache_map, filepath);
+	struct hashmap_entry *entry = hashmap_get(cache_map, file->filepath);
 	if (entry) {
 		// TODO: make cache expire after a certain time
-		*out = *(struct file_cache_item *) entry->value;
+		file->cache = (struct file_cache_item *) entry->value;
+	cache_hit:
+		if (out) *out = *file->cache;
 		return cache_hit;
 	}
+	if (!fetch_new) return cache_miss;
 
 	// TODO: read file into memory
+	//file->cache = NULL;
+	//if (out) *out = *file->cache;
 	return cache_miss;
 }

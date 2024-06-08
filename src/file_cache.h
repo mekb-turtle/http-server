@@ -12,8 +12,11 @@ enum cache_result {
 	cache_fatal_error = 0,
 	cache_file_not_found = -1,
 	cache_miss = 1,
-	cache_hit = 2
+	cache_hit = 2,
 };
 #include "serve.h"
-enum cache_result get_file_cached(char *filepath, struct file_detail *file, struct file_cache_item *out);
+enum cache_result get_file_cached(
+        struct file_detail *file,
+		struct file_cache_item *out,
+		bool fetch_new);
 #endif

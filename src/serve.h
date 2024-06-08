@@ -36,6 +36,8 @@ struct file_detail {
 	struct stat stat;
 	DIR *dir;
 	FILE *fp;
+	char *filepath;
+	struct file_cache_item *cache;
 };
 
 #include "file_cache.h"
@@ -44,7 +46,11 @@ extern bool valid_filename_n(const char *name, size_t len, const struct server_c
 extern bool valid_filename(const char *name, const struct server_config *cls);
 
 extern void close_file(struct file_detail *file_detail);
-extern bool open_file(char *filepath, struct file_detail *out, const struct server_config *cls, bool open);
+extern bool open_file(
+        char *filepath,
+        struct file_detail *out,
+        const struct server_config *cls,
+        bool open);
 
 extern bool cjson_add_file_details(cJSON *obj, struct file_detail st, char *url, char *name, struct file_cache_item *file_data);
 

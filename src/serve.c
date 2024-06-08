@@ -103,6 +103,8 @@ bool open_file(
         struct file_detail *out,
         const struct server_config *cls,
         bool open) {
+	if (!filepath) return false;
+
 	struct file_detail st_;
 	if (!out) {
 		st_ = (struct file_detail){.dir = NULL, .fp = NULL};
@@ -151,7 +153,10 @@ start_stat_file:
 			// unsupported file type
 			goto no_file;
 	}
+	out->filepath = filepath;
 	if (!open) close_file(out);
+	get_file_cached(out, NULL, false); // add cached data to file details if available
+	                                   // ignore cache result
 	return true;
 no_file:
 	return false;
@@ -168,8 +173,9 @@ bool valid_filename_n(const char *name, size_t len, const struct server_config *
 	}
 	for (size_t i = 0; i < len; ++i) {
 		if (name[i] == '\0') return false;
+		if (name[i] == '/') return false;
 #ifdef _WIN32
-		if (strchr("\\/:*?\"<>|", name[i])) return false;
+		if (strchr("\\:*?\"<>|", name[i])) return false;
 #endif
 	}
 	return true;
@@ -250,12 +256,12 @@ enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connecti
 	if (!concat_expand_escape(&output.text, str)) goto label
 
 	struct output_data output = {
-	        .data = NULL,                          // response data
-	        .data_memory = MHD_RESPMEM_PERSISTENT, // what mhd should do with the data
-	        .size = 0,                             // size of the response data
-	        .status = MHD_HTTP_OK,                 // response status
-	        .content_type = NULL,                  // response content type
-	        .json_root = cJSON_CreateObject(),     // for responding with JSON data
+	        .data = NULL,                                   // response data
+	        .data_memory = MHD_RESPMEM_PERSISTENT,          // what mhd should do with the data
+	        .size = 0,                                      // size of the response data
+	        .status = MHD_HTTP_OK,                          // response status
+	        .content_type = NULL,                           // response content type
+	        .json_root = cJSON_CreateObject(),              // for responding with JSON data
 	        .response_type = get_response_type(connection), // response content type enum
 	};
 
