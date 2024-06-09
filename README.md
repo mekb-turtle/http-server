@@ -9,17 +9,22 @@ The server supports directory listing and file preview.
 Working on:
 
 - [ ] Read files from disk to serve
-  - [ ] File caching
+  - [x] File caching
+- [x] Directory listing
 - [ ] File preview
   - [ ] Text
     - [ ] Syntax highlighting
   - [ ] Images
   - [ ] Audio
   - [ ] Video
-- [ ] Code cleanup
 
 Planned features:
 
-- [ ] Custom index page
-- [ ] Custom cache control
+- [ ] Code cleanup
+- [ ] Documentation
+- [ ] Finer control over the server
+  - [ ] Cache control
+  - [ ] Custom index page
+  - [ ] Custom error pages
+  - [ ] Set specific MIME types which are served as raw data (without file preview)
 - [ ] Signal to drop cache
