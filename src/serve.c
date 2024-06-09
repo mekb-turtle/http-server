@@ -155,8 +155,8 @@ start_stat_file:
 	}
 	out->filepath = filepath;
 	if (!open) close_file(out);
-	get_file_cached(out, NULL, false); // add cached data to file details if available
-	                                   // ignore cache result
+	get_file_cached(out, false); // add cached data to file details if available
+	                             // ignore cache result
 	return true;
 no_file:
 	return false;
@@ -185,17 +185,22 @@ bool valid_filename(const char *name, const struct server_config *cls) {
 	return valid_filename_n(name, strlen(name), cls);
 }
 
-bool cjson_add_file_details(cJSON *obj, struct file_detail st, char *url, char *name, struct file_cache_item *file_data) {
+size_t get_file_size(struct file_detail file) {
+	// prevent inconsistencies when cached file has a different size
+	if (file.cache) return file.cache->size;
+	return file.stat.st_size;
+}
+
+bool cjson_add_file_details(cJSON *obj, struct file_detail st, char *url, char *name) {
 	if (st.dir) {
 		cJSON_AddStringToObject(obj, "type", "directory");
 	} else if (st.fp) {
 		cJSON_AddStringToObject(obj, "type", "file");
-		if (file_data) {
-			cJSON_AddNumberToObject(obj, "size", file_data->size);
-			cJSON_AddStringToObject(obj, "mime", file_data->mime_type);
-			cJSON_AddBoolToObject(obj, "binary", file_data->is_binary);
+		cJSON_AddNumberToObject(obj, "size", get_file_size(st));
+		if (st.cache) {
+			cJSON_AddStringToObject(obj, "mime", st.cache->mime_type);
+			cJSON_AddBoolToObject(obj, "binary", st.cache->is_binary);
 		} else {
-			cJSON_AddNumberToObject(obj, "size", st.stat.st_size);
 		}
 	} else
 		return false;
@@ -261,7 +266,7 @@ enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connecti
 	};
 
 	struct input_data input = {
-	        .file = {.fp = NULL, .dir = NULL}, // file details
+	        .file = {.fp = NULL, .dir = NULL, .cache = NULL}, // file details
 	        .is_root_url = true,
 	        .is_download = get_is_download(connection)  // if the file should be downloaded by the browser
 	};
@@ -413,7 +418,10 @@ respond:;
 	else
 		response = MHD_create_response_from_buffer(output.size, output.data, output.data_memory);
 	if (input.is_download) {
-		MHD_add_response_header(response, MHD_HTTP_HEADER_CONTENT_DISPOSITION, "attachment"); // TODO: set filename + download_extension
+		// TODO: set filename + download_extension for this header
+		(void) download_extension;
+		// requires encoding the filename
+		MHD_add_response_header(response, MHD_HTTP_HEADER_CONTENT_DISPOSITION, "attachment");
 	}
 	if (output.content_type) MHD_add_response_header(response, MHD_HTTP_HEADER_CONTENT_TYPE, output.content_type);
 	int ret = MHD_queue_response(connection, output.status, response);

@@ -27,10 +27,10 @@ static void free_value(void *value_) {
 
 enum cache_result get_file_cached(
         struct file_detail *file,
-		struct file_cache_item *out,
-		bool fetch_new) {
+        bool fetch_new) {
 	if (!file) return cache_fatal_error;
 	if (!file->filepath) return cache_fatal_error;
+	if (!file->fp) return cache_not_a_file;
 	if (file->cache) goto cache_hit;
 
 	static struct hashmap *cache_map = NULL;
@@ -46,17 +46,26 @@ enum cache_result get_file_cached(
 		// TODO: make cache expire after a certain time
 		file->cache = (struct file_cache_item *) entry->value;
 	cache_hit:
-		if (out) *out = *file->cache;
 		return cache_hit;
 	}
 	if (!fetch_new) {
 		return cache_miss;
 	}
 
-	struct file_cache_item *data = malloc(sizeof(struct file_cache_item));
-	if (!data) return cache_fatal_error;
+	// create a new cache entry
+	// copy the filepath to avoid dangling pointers
+	size_t filepath_len = strlen(file->filepath) + 1;
+	char *filepath = malloc(filepath_len);
+	if (!filepath) return cache_fatal_error;
+	memcpy(filepath, file->filepath, filepath_len);
 
-	if (!hashmap_set(cache_map, file->filepath, data)) {
+	struct file_cache_item *data = malloc(sizeof(struct file_cache_item));
+	if (!data) {
+		free(filepath);
+		return cache_fatal_error;
+	}
+
+	if (!hashmap_set(cache_map, filepath, data)) {
 		free(data);
 		return cache_fatal_error;
 	}
@@ -68,6 +77,5 @@ enum cache_result get_file_cached(
 
 	// TODO: read file into memory
 	file->cache = data;
-	if (out) *out = *file->cache;
 	return cache_miss;
 }

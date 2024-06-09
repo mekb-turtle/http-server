@@ -19,7 +19,7 @@ static bool add_dir_item(enum response_type response_type, char **data, struct f
 			custom_type = "unknown";
 	}
 
-	off_t size = file.stat.st_size;
+	size_t size = get_file_size(file);
 	char size_str[32];
 	snprintf(size_str, 32, "%li", size);
 	char *size_format = format_bytes(size, binary_i);
@@ -64,7 +64,7 @@ static bool add_dir_item(enum response_type response_type, char **data, struct f
 			break;
 		case OUT_JSON:;
 			cJSON *obj = cJSON_CreateObject();
-			cjson_add_file_details(obj, file, url, name, NULL);
+			cjson_add_file_details(obj, file, url, name);
 			cJSON_AddItemToArray(dir_array, obj);
 			break;
 	}
@@ -109,7 +109,7 @@ enum serve_result serve_directory(const struct server_config *cls, struct input_
 		case OUT_JSON:
 			dir_array = cJSON_CreateArray();
 			cJSON_AddItemToObject(output->json_root, "children", dir_array);
-			cjson_add_file_details(output->json_root, input->file, input->url, NULL, NULL);
+			cjson_add_file_details(output->json_root, input->file, input->url, NULL);
 			break;
 	}
 
@@ -139,7 +139,10 @@ enum serve_result serve_directory(const struct server_config *cls, struct input_
 
 		char child_url[PATH_MAX];
 		memcpy(child_url, input->url, PATH_MAX);
-		if (!join_url_path(child_url, PATH_MAX, child_name)) continue;
+		if (!join_url_path(child_url, PATH_MAX, child_name)) {
+			close_file(&child_file);
+			continue;
+		}
 
 		res = add_dir_item(output->response_type, &output->text, child_file, child_url, child_name, dir_array, "child", NULL);
 

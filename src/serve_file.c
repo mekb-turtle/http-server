@@ -11,29 +11,28 @@
 	if (!concat_expand_escape(&output->text, str)) goto label
 enum serve_result serve_file(const struct server_config *cls, struct input_data *input, struct output_data *output) {
 	if (!input->file.fp) return serve_not_found;
-	struct file_cache_item file;
-	enum cache_result result = get_file_cached(&input->file, &file, true);
+	enum cache_result result = get_file_cached(&input->file, true);
 	switch (result) {
 		case cache_fatal_error:
 			return serve_error;
 		case cache_file_not_found:
 			return serve_not_found;
 		default:
+			break;
 	}
 
-	file.size = 0;
+	struct file_cache_item *file_data = input->file.cache;
 	char size_str[32];
-	snprintf(size_str, 32, "%li", file.size);
-	char *size_format = format_bytes(file.size, binary_i);
+	snprintf(size_str, 32, "%li", file_data->size);
+	char *size_format = format_bytes(file_data->size, binary_i);
 
-	// currently segfaults with text and JSON, TODO: fix
 	switch (output->response_type) {
 		case OUT_NONE:
 		case OUT_TEXT:
 			output->response_type = OUT_NONE;
-			output->data = file.data;
-			output->size = file.size;
-			output->content_type = file.mime_type; // TODO: set charset parameter
+			output->data = file_data->data;
+			output->size = file_data->size;
+			output->content_type = file_data->mime_type; // TODO: set charset parameter
 			break;
 		case OUT_HTML:
 			output->data_memory = MHD_RESPMEM_MUST_FREE;
@@ -61,9 +60,9 @@ enum serve_result serve_file(const struct server_config *cls, struct input_data 
 			append(" bytes\">", server_error);
 			append_escape(size_format, server_error);
 			append("</span>", server_error);
-			if (file.mime_type) {
+			if (file_data->mime_type) {
 				append(" - <span class=\"file-size\" title=\"Content Type\">", server_error);
-				append_escape(file.mime_type, server_error);
+				append_escape(file_data->mime_type, server_error);
 				append("</span>", server_error);
 			}
 			append("</p>\n", server_error);
@@ -71,13 +70,13 @@ enum serve_result serve_file(const struct server_config *cls, struct input_data 
 			output->size = strlen(output->text);
 			break;
 		case OUT_JSON:;
-			cjson_add_file_details(output->json_root, input->file, input->url, NULL, &file);
+			cjson_add_file_details(output->json_root, input->file, input->url, NULL);
 			break;
 	}
 	free(size_format);
 	return serve_ok;
 server_error:
-	if (output->data && output->data != file.data) free(output->data); // free the data if it was allocated
+	if (output->data && output->data != file_data->data) free(output->data); // free the data if it was allocated
 	free(size_format);
 	return serve_error;
 }

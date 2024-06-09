@@ -48,7 +48,8 @@ extern bool open_file(
         const struct server_config *cls,
         bool open);
 
-extern bool cjson_add_file_details(cJSON *obj, struct file_detail st, char *url, char *name, struct file_cache_item *file_data);
+extern size_t get_file_size(struct file_detail file);
+extern bool cjson_add_file_details(cJSON *obj, struct file_detail st, char *url, char *name);
 
 extern bool WARN_UNUSED construct_html_head(char **base);
 extern bool WARN_UNUSED construct_html_body(char **base, char *title_class);
