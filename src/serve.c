@@ -250,11 +250,6 @@ enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connecti
                                      const char *method, const char *version,
                                      const char *upload_data,
                                      size_t *upload_data_size, void **req_cls) {
-#define append(str, label) \
-	if (!concat_expand(&output.text, str)) goto label
-#define append_escape(str, label) \
-	if (!concat_expand_escape(&output.text, str)) goto label
-
 	struct output_data output = {
 	        .data = NULL,                                   // response data
 	        .data_memory = MHD_RESPMEM_PERSISTENT,          // what mhd should do with the data

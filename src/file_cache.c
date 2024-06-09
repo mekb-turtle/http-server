@@ -49,10 +49,25 @@ enum cache_result get_file_cached(
 		if (out) *out = *file->cache;
 		return cache_hit;
 	}
-	if (!fetch_new) return cache_miss;
+	if (!fetch_new) {
+		return cache_miss;
+	}
+
+	struct file_cache_item *data = malloc(sizeof(struct file_cache_item));
+	if (!data) return cache_fatal_error;
+
+	if (!hashmap_set(cache_map, file->filepath, data)) {
+		free(data);
+		return cache_fatal_error;
+	}
+
+	data->data = NULL;
+	data->size = 0;
+	data->is_binary = false;
+	data->mime_type = NULL;
 
 	// TODO: read file into memory
-	//file->cache = NULL;
-	//if (out) *out = *file->cache;
+	file->cache = data;
+	if (out) *out = *file->cache;
 	return cache_miss;
 }

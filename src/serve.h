@@ -10,11 +10,7 @@
 #include <microhttpd.h>
 #include <cjson/cJSON.h>
 
-#ifdef __GNUC__
-#define WARN_UNUSED __attribute__((warn_unused_result))
-#else
-#define WARN_UNUSED
-#endif
+#include "attribute.h"
 
 struct server_config {
 	char *base_file;

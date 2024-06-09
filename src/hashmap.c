@@ -1,9 +1,9 @@
 #include "hashmap.h"
 #include <stdlib.h>
 
-struct hashmap hashmap_create(size_t size,
-                              hashmap_hash_key hash_key, hashmap_compare_key compare_key,
-                              hashmap_free_key free_key, hashmap_free_value free_value) {
+struct hashmap WARN_UNUSED hashmap_create(size_t size,
+                                          hashmap_hash_key hash_key, hashmap_compare_key compare_key,
+                                          hashmap_free_key free_key, hashmap_free_value free_value) {
 	// allocate memory for the map and initialize all buckets to NULL
 	struct hashmap map;
 	map.size = 0;
@@ -23,6 +23,8 @@ struct hashmap hashmap_create(size_t size,
 }
 
 void hashmap_free(struct hashmap *map) {
+	if (!map) return;
+	if (!map->buckets) return;
 	// free all entries, then free all buckets
 	for (size_t i = 0; i < map->size; i++) {
 		struct hashmap_entry *entry = map->buckets[i];
@@ -43,7 +45,7 @@ static size_t internal_get_bucket_index(struct hashmap *map, void *key) {
 	return map->hash_key(key) % map->size;
 }
 
-struct hashmap_entry *hashmap_set(struct hashmap *map, void *key, void *value) {
+struct hashmap_entry *WARN_UNUSED hashmap_set(struct hashmap *map, void *key, void *value) {
 	// get the bucket for the key, then iterate over the linked list to find the key
 	size_t bucket_index = internal_get_bucket_index(map, key);
 	struct hashmap_entry *entry = map->buckets[bucket_index];
@@ -56,7 +58,7 @@ struct hashmap_entry *hashmap_set(struct hashmap *map, void *key, void *value) {
 	// if the key was not found, create a new entry
 	struct hashmap_entry *new_entry = malloc(sizeof(struct hashmap_entry));
 	if (!new_entry) return NULL;
-	if (!entry) {
+	if (entry) {
 		// update the previous entry's next pointer
 		entry->next = new_entry;
 	} else {
@@ -103,7 +105,7 @@ bool hashmap_remove(struct hashmap *map, void *key) {
 	return false;
 }
 
-struct hashmap_entry *hashmap_get(struct hashmap *map, void *key) {
+struct hashmap_entry *WARN_UNUSED hashmap_get(struct hashmap *map, void *key) {
 	// get the bucket for the key, then iterate over the linked list to find the key
 	struct hashmap_entry *entry = map->buckets[internal_get_bucket_index(map, key)];
 	for (; entry; entry = entry->next) {

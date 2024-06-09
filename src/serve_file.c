@@ -21,6 +21,7 @@ enum serve_result serve_file(const struct server_config *cls, struct input_data 
 		default:
 	}
 
+	file.size = 0;
 	char size_str[32];
 	snprintf(size_str, 32, "%li", file.size);
 	char *size_format = format_bytes(file.size, binary_i);
@@ -59,10 +60,13 @@ enum serve_result serve_file(const struct server_config *cls, struct input_data 
 			append_escape(size_str, server_error);
 			append(" bytes\">", server_error);
 			append_escape(size_format, server_error);
-			append("</span> - ", server_error);
-			append("<span class=\"file-size\" title=\"Content Type\">", server_error);
-			append_escape(file.mime_type, server_error);
-			append("</span></p>\n", server_error);
+			append("</span>", server_error);
+			if (file.mime_type) {
+				append(" - <span class=\"file-size\" title=\"Content Type\">", server_error);
+				append_escape(file.mime_type, server_error);
+				append("</span>", server_error);
+			}
+			append("</p>\n", server_error);
 			if (!construct_html_end(&output->text)) goto server_error;
 			output->size = strlen(output->text);
 			break;

@@ -117,7 +117,7 @@ enum serve_result serve_directory(const struct server_config *cls, struct input_
 	if (!input->is_root_url) {
 		// add parent directory link
 		struct file_detail parent_file = {.dir = NULL, .fp = NULL};
-		if (open_file(input->filepath_parent, &parent_file, cls, true, false)) {
+		if (open_file(input->filepath_parent, &parent_file, cls, true)) {
 			res = add_dir_item(output->response_type, &output->text, parent_file, input->url_parent, "..", dir_array, "parent", "parent directory");
 			close_file(&parent_file);
 			if (!res) goto server_error;
@@ -135,7 +135,7 @@ enum serve_result serve_directory(const struct server_config *cls, struct input_
 		char child_filepath[PATH_MAX];
 		memcpy(child_filepath, input->filepath, PATH_MAX);
 		if (!join_filepath(child_filepath, PATH_MAX, child_name)) continue;
-		if (!open_file(child_filepath, &child_file, cls, true, false)) continue; // skip if cannot open file
+		if (!open_file(child_filepath, &child_file, cls, true)) continue; // skip if cannot open file
 
 		char child_url[PATH_MAX];
 		memcpy(child_url, input->url, PATH_MAX);

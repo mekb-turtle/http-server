@@ -68,10 +68,7 @@ char *format_bytes(size_t byte, enum format_bytes_mode mode) {
 	if (snprintf(str, 64, "%zu%s %c%s", mantissa, frac_str_dp, suffixes[exp_index], suffix) < 0)
 		goto snprintf_error;
 
-	if (byte == 0) {
-		if (snprintf(str, 64, "0") < 0) // don't bother printing "bytes" for 0
-			goto snprintf_error;
-	} else if (exp_index == 0) { // append "bytes" instead
+	if (exp_index == 0) { // append "bytes" instead
 		char *trim = strchr(str, ' ');
 		if (trim) {
 			if (snprintf(trim, 64 - (trim - str), " byte%s", byte == 1 ? "" : "s") < 0)
