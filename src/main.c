@@ -10,6 +10,7 @@
 #include <arpa/inet.h>
 #include <microhttpd.h>
 #include "serve.h"
+#include "file_cache.h"
 
 #define eprintf(...) fprintf(stderr, __VA_ARGS__)
 
@@ -231,6 +232,7 @@ static void signal_handler(int sig) {
 }
 
 static void handle_exit() {
+	free_file_cache();
 	if (httpd) {
 		MHD_stop_daemon(httpd);
 		httpd = NULL;

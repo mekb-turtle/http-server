@@ -3,6 +3,10 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+#define eprintf(...) fprintf(stderr, __VA_ARGS__)
+
+// for hashmap functions
 static bool strcmp_compare(void *key1, void *key2) {
 	return strcmp(key1, key2) == 0;
 }
@@ -24,16 +28,20 @@ static void free_value(void *value_) {
 	free(value->mime_type);
 	free(value);
 }
+static struct hashmap *cache_map = NULL;
+
+void free_file_cache(void) {
+	hashmap_free(cache_map);
+	cache_map = NULL;
+}
 
 enum cache_result get_file_cached(
         struct file_detail *file,
         bool fetch_new) {
 	if (!file) return cache_fatal_error;
 	if (!file->filepath) return cache_fatal_error;
-	if (!file->fp) return cache_not_a_file;
 	if (file->cache) goto cache_hit;
 
-	static struct hashmap *cache_map = NULL;
 	if (!cache_map) {
 		// initialize the cache map
 		static struct hashmap cache_map_;
@@ -48,9 +56,8 @@ enum cache_result get_file_cached(
 	cache_hit:
 		return cache_hit;
 	}
-	if (!fetch_new) {
-		return cache_miss;
-	}
+	if (!fetch_new) return cache_miss;
+	if (!file->fp) return cache_not_a_file;
 
 	// create a new cache entry
 	// copy the filepath to avoid dangling pointers
@@ -59,23 +66,53 @@ enum cache_result get_file_cached(
 	if (!filepath) return cache_fatal_error;
 	memcpy(filepath, file->filepath, filepath_len);
 
-	struct file_cache_item *data = malloc(sizeof(struct file_cache_item));
-	if (!data) {
+	struct file_cache_item *cache_item = malloc(sizeof(struct file_cache_item));
+	if (!cache_item) {
 		free(filepath);
 		return cache_fatal_error;
 	}
 
-	if (!hashmap_set(cache_map, filepath, data)) {
-		free(data);
+	cache_item->size = file->stat.st_size;
+	cache_item->data = malloc(cache_item->size);
+	if (!cache_item->data) {
+		free(filepath);
+		free(cache_item);
 		return cache_fatal_error;
 	}
 
-	data->data = NULL;
-	data->size = 0;
-	data->is_binary = false;
-	data->mime_type = NULL;
+	size_t read = fread(cache_item->data, 1, file->stat.st_size, file->fp);
+	if (read != file->stat.st_size || ferror(file->fp)) {
+	read_error:
+		eprintf("Error reading file: %s\n", file->filepath);
+		if (read != file->stat.st_size)
+			eprintf("Expected: %zu bytes, Read: %zu bytes\n", file->stat.st_size, read);
+		else
+			eprintf("File has more data than expected\n");
+		eprintf("Error: %s, EOF: %s\n",
+		        ferror(file->fp) ? "yes" : "no", feof(file->fp) ? "yes" : "no");
+		free(filepath);
+		free(cache_item->data);
+		free(cache_item);
+		return cache_fatal_error;
+	}
+
+	// check the file is at EOF
+	if (fgetc(file->fp) != EOF) goto read_error;
+
+	// TODO: determine if the file is binary (probably by checking for NULL bytes)
+	// TODO: determine the MIME type (probably using libmagic)
+
+	cache_item->is_binary = false;
+	cache_item->mime_type = NULL;
+
+	if (!hashmap_set(cache_map, filepath, cache_item)) {
+		free(filepath);
+		free(cache_item->data);
+		free(cache_item);
+		return cache_fatal_error;
+	}
 
 	// TODO: read file into memory
-	file->cache = data;
+	file->cache = cache_item;
 	return cache_miss;
 }

@@ -18,5 +18,6 @@ enum cache_result {
 #include "serve.h"
 enum cache_result get_file_cached(
         struct file_detail *file,
-		bool fetch_new);
+        bool fetch_new);
+extern void free_file_cache(void);
 #endif

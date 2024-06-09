@@ -124,8 +124,7 @@ start_stat_file:
 		case S_IFDIR:
 			out->dir = opendir(filepath);
 			if (!out->dir) {
-				if (!cls->quiet)
-					eprintf("Failed to open directory: %s: %s\n", filepath, strerror(errno));
+				eprintf("Failed to open directory: %s: %s\n", filepath, strerror(errno));
 				goto no_file;
 			}
 			break;
@@ -134,8 +133,7 @@ start_stat_file:
 			// follow symlink
 			char filepath_[PATH_MAX];
 			if (!realpath(filepath, filepath_)) {
-				if (!cls->quiet)
-					eprintf("Invalid symlink path: %s: %s\n", filepath_, strerror(errno));
+				eprintf("Invalid symlink path: %s: %s\n", filepath_, strerror(errno));
 				goto no_file;
 			}
 			memcpy(filepath, filepath_, PATH_MAX);
@@ -144,8 +142,7 @@ start_stat_file:
 			// TODO: caching
 			out->fp = fopen(filepath, "rb");
 			if (!out->fp) {
-				if (!cls->quiet)
-					eprintf("Failed to open file: %s: %s\n", filepath, strerror(errno));
+				eprintf("Failed to open file: %s: %s\n", filepath, strerror(errno));
 				goto no_file;
 			}
 			break;
@@ -155,8 +152,12 @@ start_stat_file:
 	}
 	out->filepath = filepath;
 	if (!open) close_file(out);
-	get_file_cached(out, false); // add cached data to file details if available
-	                             // ignore cache result
+
+	// add cached data to file details if available
+	if (get_file_cached(out, false) == cache_fatal_error) {
+		close_file(out);
+		return false;
+	}
 	return true;
 no_file:
 	return false;
@@ -287,7 +288,7 @@ enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connecti
 	if (user_url[0] != '/') goto bad_request;
 
 	// set up input data
-	char url_[PATH_MAX], url_parent_[PATH_MAX], filepath_[PATH_MAX], filepath_parent_[PATH_MAX];
+	char url_[PATH_MAX], url_parent_[PATH_MAX], filepath_[PATH_MAX], filepath_parent_[PATH_MAX], log_url[PATH_MAX];
 	input.url = url_;
 	input.url_parent = url_parent_;
 	input.filepath = filepath_;
@@ -334,6 +335,8 @@ enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connecti
 	ensure_path_slash(input.filepath, PATH_SEPARATOR);
 	ensure_path_slash(input.filepath_parent, PATH_SEPARATOR);
 
+	memcpy(log_url, input.url, PATH_MAX);
+
 serve_logic:;
 	enum serve_result result = not_found;
 	if (input.file.fp) {
@@ -361,6 +364,9 @@ not_found:
 		not_found = true;
 		// resolve the file
 		if (!open_file(cls->not_found_file, &input.file, cls, true)) goto not_found;
+		input.url_parent = "/";
+
+		// TODO: make it always return raw data as the not found page
 		goto serve_logic;
 	}
 	goto respond;
@@ -451,7 +457,7 @@ respond:;
 		        "Request: %s%s%s %s\n"
 		        "Response: %i %s, %s%sType: %s, %s%s%s\n",
 		        ip ? ip : "", ip ? ", " : "",
-		        method, input.url,
+		        method, log_url,
 		        output.status, status_codes[output.status],
 		        output.content_type ? output.content_type : "", output.content_type ? ", " : "",
 		        response_type_str,

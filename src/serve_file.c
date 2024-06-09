@@ -16,6 +16,7 @@ enum serve_result serve_file(const struct server_config *cls, struct input_data 
 		case cache_fatal_error:
 			return serve_error;
 		case cache_file_not_found:
+		case cache_not_a_file:
 			return serve_not_found;
 		default:
 			break;
