@@ -1,12 +1,20 @@
 # http-server
 
-### Simple file HTTP server in C [Work in progress]
+### [Work in progress]
 
-This is a simple HTTP server that serves files from a directory. It is written in C and uses the libmicrohttpd library and cJSON.
+Simple HTTP server that serves files from a directory. It is written in C using the libmicrohttpd library.
+
+#### Compiling:
+
+1. Install dependencies
+  - libmicrohttpd (arch: `libmicrohttpd`, debian: `libmicrohttpd-dev`)
+  - cJSON (arch: `cjson`, debian: `libcjson-dev`)
+2. Run `make`
+3. Binary will be created in `build/*/bin/`
 
 The server supports directory listing and file preview.
 
-Working on:
+#### Working on:
 
 - [ ] Read files from disk to serve
   - [x] File caching
@@ -18,7 +26,7 @@ Working on:
   - [ ] Audio
   - [ ] Video
 
-Planned features:
+#### Planned features:
 
 - [ ] Code cleanup
 - [ ] Documentation
