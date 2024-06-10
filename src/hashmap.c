@@ -22,22 +22,33 @@ struct hashmap WARN_UNUSED hashmap_create(size_t size,
 	return map;
 }
 
+static void free_entry_kv(struct hashmap_entry *entry, struct hashmap *map) {
+	if (!entry) return;
+	// free key and value
+	if (entry->key && map->free_key) map->free_key(entry->key);
+	if (entry->value && map->free_value) map->free_value(entry->value);
+}
+
+static void free_entry(struct hashmap_entry *entry, struct hashmap *map) {
+	if (!entry) return;
+	free_entry_kv(entry, map);
+	// free the entry
+	free(entry);
+}
+
 void hashmap_free(struct hashmap *map) {
 	if (!map) return;
 	if (!map->buckets) return;
-	// free all entries, then free all buckets
+	// free all entries
 	for (size_t i = 0; i < map->size; i++) {
 		struct hashmap_entry *entry = map->buckets[i];
 		while (entry) {
 			struct hashmap_entry *next = entry->next;
-			// free the key and value, then the entry
-			if (entry->key && map->free_key) map->free_key(entry->key);
-			if (entry->value && map->free_value) map->free_value(entry->value);
-			free(entry);
-			// move to the next entry
+			free_entry(entry, map);
 			entry = next;
 		}
 	}
+	// free buckets
 	free(map->buckets);
 }
 
@@ -50,7 +61,14 @@ struct hashmap_entry *WARN_UNUSED hashmap_set(struct hashmap *map, void *key, vo
 	size_t bucket_index = internal_get_bucket_index(map, key);
 	struct hashmap_entry *entry = map->buckets[bucket_index];
 	while (entry) {
-		if (map->compare_key(entry->key, key)) goto found_key;
+		if (map->compare_key(entry->key, key)) {
+			// free old key and value
+			free_entry_kv(entry, map);
+			// set the new key and value
+			entry->key = key;
+			entry->value = value;
+			return entry;
+		}
 		if (!entry->next) break; // stop before we set entry to NULL
 		entry = entry->next;
 	}
@@ -65,19 +83,11 @@ struct hashmap_entry *WARN_UNUSED hashmap_set(struct hashmap *map, void *key, vo
 		// update the head entry's next pointer
 		map->buckets[bucket_index] = new_entry;
 	}
-	entry = new_entry;
-	entry->key = NULL;
-	entry->value = NULL;
-
-found_key:
-	// free the old key and value, if they exist
-	if (entry->key && map->free_key) map->free_key(entry->key);
-	if (entry->value && map->free_value) map->free_value(entry->value);
-
-	// set the key and value, then return the entry
-	entry->key = key;
-	entry->value = value;
-	return entry;
+	// set the new key and value
+	new_entry->key = key;
+	new_entry->value = value;
+	new_entry->next = NULL;
+	return new_entry;
 }
 
 bool hashmap_remove(struct hashmap *map, void *key) {
@@ -95,10 +105,7 @@ bool hashmap_remove(struct hashmap *map, void *key) {
 				// update the previous entry's next pointer
 				prev->next = entry->next;
 			}
-			// free the key and value, then the entry
-			if (entry->key && map->free_key) map->free_key(entry->key);
-			if (entry->value && map->free_value) map->free_value(entry->value);
-			free(entry);
+			free_entry(entry, map);
 			return true;
 		}
 	}

@@ -24,8 +24,8 @@ static size_t fnv_1a_hash(void *data) {
 }
 static void free_value(void *value_) {
 	struct file_cache_item *value = (struct file_cache_item *) value_;
-	free(value->data);
-	free(value->mime_type);
+	if (value->data) free(value->data);
+	if (value->mime_type) free(value->mime_type);
 	free(value);
 }
 static struct hashmap *cache_map = NULL;
@@ -72,11 +72,13 @@ enum cache_result get_file_cached(
 		return cache_fatal_error;
 	}
 
+	cache_item->is_binary = false;
+	cache_item->mime_type = NULL;
 	cache_item->size = file->stat.st_size;
 	cache_item->data = malloc(cache_item->size);
 	if (!cache_item->data) {
 		free(filepath);
-		free(cache_item);
+		free_value(cache_item);
 		return cache_fatal_error;
 	}
 
@@ -91,8 +93,7 @@ enum cache_result get_file_cached(
 		eprintf("Error: %s, EOF: %s\n",
 		        ferror(file->fp) ? "yes" : "no", feof(file->fp) ? "yes" : "no");
 		free(filepath);
-		free(cache_item->data);
-		free(cache_item);
+		free_value(cache_item);
 		return cache_fatal_error;
 	}
 
@@ -102,13 +103,9 @@ enum cache_result get_file_cached(
 	// TODO: determine if the file is binary (probably by checking for NULL bytes)
 	// TODO: determine the MIME type (probably using libmagic)
 
-	cache_item->is_binary = false;
-	cache_item->mime_type = NULL;
-
 	if (!hashmap_set(cache_map, filepath, cache_item)) {
 		free(filepath);
-		free(cache_item->data);
-		free(cache_item);
+		free_value(cache_item);
 		return cache_fatal_error;
 	}
 
