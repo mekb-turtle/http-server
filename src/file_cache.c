@@ -1,8 +1,10 @@
-#include "hashmap.h"
 #include "file_cache.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include "attribute.h"
+#include "hashmap.h"
+#include "magic.h"
 
 #define eprintf(...) fprintf(stderr, __VA_ARGS__)
 
@@ -25,14 +27,28 @@ static size_t fnv_1a_hash(void *data) {
 static void free_value(void *value_) {
 	struct file_cache_item *value = (struct file_cache_item *) value_;
 	if (value->data) free(value->data);
-	if (value->mime_type) free(value->mime_type);
+	if (value->mime_type) free(value->mime_type); // mime_type is strdup'd
 	free(value);
 }
+
 static struct hashmap *cache_map = NULL;
 
 void free_file_cache(void) {
 	hashmap_free(cache_map);
 	cache_map = NULL;
+}
+
+bool initialize_cache_map() {
+	if (cache_map) return true;
+	// initialize the cache map
+	static struct hashmap cache_map_;
+	cache_map_ = hashmap_create(0x400, fnv_1a_hash, strcmp_compare, free, free_value);
+	if (!cache_map_.buckets) {
+		eprintf("Failed to create cache hashmap\n");
+		return false;
+	}
+	cache_map = &cache_map_;
+	return true;
 }
 
 enum cache_result get_file_cached(
@@ -42,13 +58,9 @@ enum cache_result get_file_cached(
 	if (!file->filepath) return cache_fatal_error;
 	if (file->cache) goto cache_hit;
 
-	if (!cache_map) {
-		// initialize the cache map
-		static struct hashmap cache_map_;
-		cache_map_ = hashmap_create(0x400, fnv_1a_hash, strcmp_compare, free, free_value);
-		if (!cache_map_.buckets) return cache_fatal_error;
-		cache_map = &cache_map_;
-	}
+	if (!initialize_cache_map()) return cache_fatal_error;
+	if (!initialize_magic()) return cache_fatal_error;
+
 	struct hashmap_entry *entry = hashmap_get(cache_map, file->filepath);
 	if (entry) {
 		// TODO: make cache expire after a certain time
@@ -56,30 +68,33 @@ enum cache_result get_file_cached(
 	cache_hit:
 		return cache_hit;
 	}
-	if (!fetch_new) return cache_miss;
-	if (!file->fp) return cache_not_a_file;
+	if (!fetch_new) return cache_miss;      // return miss if we don't want to fetch new data
+	if (!file->fp) return cache_not_a_file; // can't read a file if it isn't open
 
 	// create a new cache entry
+
 	// copy the filepath to avoid dangling pointers
-	size_t filepath_len = strlen(file->filepath) + 1;
-	char *filepath = malloc(filepath_len);
-	if (!filepath) return cache_fatal_error;
-	memcpy(filepath, file->filepath, filepath_len);
+	char *filepath = strdup(file->filepath);
+	if (!filepath) {
+	malloc_error:
+		eprintf("Failed to allocate memory\n");
+		return cache_fatal_error;
+	}
 
 	struct file_cache_item *cache_item = malloc(sizeof(struct file_cache_item));
 	if (!cache_item) {
 		free(filepath);
-		return cache_fatal_error;
+		goto malloc_error;
 	}
 
-	cache_item->is_binary = false;
-	cache_item->mime_type = NULL;
+	memset(cache_item, 0, sizeof(struct file_cache_item)); // zero out the struct
+
 	cache_item->size = file->stat.st_size;
 	cache_item->data = malloc(cache_item->size);
 	if (!cache_item->data) {
 		free(filepath);
 		free_value(cache_item);
-		return cache_fatal_error;
+		goto malloc_error;
 	}
 
 	size_t read = fread(cache_item->data, 1, file->stat.st_size, file->fp);
@@ -101,9 +116,33 @@ enum cache_result get_file_cached(
 	if (fgetc(file->fp) != EOF) goto read_error;
 
 	// TODO: determine if the file is binary (probably by checking for NULL bytes)
-	// TODO: determine the MIME type (probably using libmagic)
+
+	// determine the MIME type using libmagic
+	cache_item->mime = magic_buffer(magic_cookie, cache_item->data, cache_item->size);
+
+	if (cache_item->mime) {
+		// find the MIME type
+		char *mime_type = strdup(cache_item->mime);
+		if (!mime_type) {
+			free(filepath);
+			free_value(cache_item);
+			goto malloc_error;
+		}
+		char *semicolon = strchr(mime_type, ';');
+		if (semicolon) *semicolon = '\0'; // trim the semicolon and everything after it
+		cache_item->mime_type = mime_type;
+
+		// parse the MIME type
+		const char *encoding = strchr(cache_item->mime, ';');
+		if (encoding) {
+			++encoding;                          // skip the semicolon
+			while (*encoding == ' ') ++encoding; // skip leading spaces
+			if (*encoding != '\0') cache_item->mime_encoding = encoding;
+		}
+	}
 
 	if (!hashmap_set(cache_map, filepath, cache_item)) {
+		eprintf("Failed to set cache item\n");
 		free(filepath);
 		free_value(cache_item);
 		return cache_fatal_error;

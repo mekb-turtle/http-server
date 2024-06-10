@@ -33,7 +33,7 @@ enum serve_result serve_file(const struct server_config *cls, struct input_data 
 			output->response_type = OUT_NONE;
 			output->data = file_data->data;
 			output->size = file_data->size;
-			output->content_type = file_data->mime_type; // TODO: set charset parameter
+			output->content_type = file_data->mime;
 			break;
 		case OUT_HTML:
 			output->data_memory = MHD_RESPMEM_MUST_FREE;
@@ -64,6 +64,11 @@ enum serve_result serve_file(const struct server_config *cls, struct input_data 
 			if (file_data->mime_type) {
 				append(" - <span class=\"file-size\" title=\"Content Type\">", server_error);
 				append_escape(file_data->mime_type, server_error);
+				append("</span>", server_error);
+			}
+			if (file_data->mime_encoding) {
+				append(" - <span class=\"file-size\" title=\"Content Type\">", server_error);
+				append_escape(file_data->mime_encoding, server_error);
 				append("</span>", server_error);
 			}
 			append("</p>\n", server_error);

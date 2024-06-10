@@ -12,12 +12,11 @@
 #include "util.h"
 #include "format_bytes.h"
 #include "status_code.h"
+#include "attribute.h"
 
 #include "serve_file.h"
 #include "serve_directory.h"
 #include "serve_result.h"
-
-#define eprintf(...) fprintf(stderr, __VA_ARGS__)
 
 static char *sockaddr_to_string(struct sockaddr *addr) {
 	if (addr)
@@ -371,8 +370,8 @@ not_found:
 	}
 	goto respond;
 server_error:
-	output.status = MHD_HTTP_INTERNAL_SERVER_ERROR;
-	goto respond;
+	exit(EXIT_FAILURE);
+
 too_long:
 	output.status = MHD_HTTP_URI_TOO_LONG;
 	goto respond;

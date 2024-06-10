@@ -6,7 +6,9 @@ struct file_cache_item {
 	void *data;
 	size_t size;
 	bool is_binary;
+	const char *mime;
 	char *mime_type;
+	const char *mime_encoding;
 };
 enum cache_result {
 	cache_file_not_found = 0,

@@ -1,6 +1,7 @@
 #include "util.h"
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 // for systems w/o GNU extensions
 char *strchrnul_(const char *s, int c) {
 	for (; *s && *s != c; s++)
@@ -23,15 +24,21 @@ char *WARN_UNUSED concat_expand_n(char **base, const char *add, size_t add_len) 
 	size_t base_len = 0;
 	if (!*base) {
 		*base = malloc(add_len + 1);
-		if (!*base) return NULL;
+		if (!*base) {
+			eprintf("Failed to allocate memory\n");
+			return NULL;
+		}
 		(*base)[0] = '\0';
 	} else {
 		base_len = strlen(*base);
-		*base = realloc(*base, base_len + add_len + 1);
-		if (!*base) {
+		char *new_base = realloc(*base, base_len + add_len + 1);
+		if (!new_base) {
+			eprintf("Failed to allocate memory\n");
 			free(*base);
+			*base = NULL;
 			return NULL;
 		}
+		*base = new_base;
 	}
 	memcpy(*base + base_len, add, add_len);
 	(*base)[base_len + add_len] = '\0';

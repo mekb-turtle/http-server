@@ -11,8 +11,8 @@
 #include <microhttpd.h>
 #include "serve.h"
 #include "file_cache.h"
-
-#define eprintf(...) fprintf(stderr, __VA_ARGS__)
+#include "magic.h"
+#include "attribute.h"
 
 static struct MHD_Daemon *httpd;
 static void signal_handler(int sig); // later in the code
@@ -221,7 +221,7 @@ int main(int argc, char *argv[]) {
 	        SIGVTALRM};
 	for (int i = 0; i < sizeof(signals) / sizeof(signals[0]); i++)
 		signal(signals[i], signal_handler);
-	signal(SIGUSR1, signal_handler); // TODO: make it clear cache
+	signal(SIGUSR1, signal_handler); // TODO: make it clear cache safely
 	signal(SIGUSR2, signal_handler);
 	while (true) pause();
 }
@@ -232,10 +232,11 @@ static void signal_handler(int sig) {
 }
 
 static void handle_exit() {
-	free_file_cache();
 	if (httpd) {
 		MHD_stop_daemon(httpd);
 		httpd = NULL;
 		printf("Stopped server...\n");
 	}
+	close_magic();
+	free_file_cache();
 }
