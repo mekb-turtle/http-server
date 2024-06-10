@@ -14,8 +14,14 @@ SRC_BINARY_DIR = binary
 
 CPPFLAGS += -DTARGET='"$(TARGET)"'
 
+ifdef TARGET
+	CPPFLAGS += -DTARGET='"$(TARGET)"'
+endif
 ifdef VERSION
 	CPPFLAGS += -DVERSION='"$(VERSION)"'
+endif
+ifdef URL
+	CPPFLAGS += -DURL='"$(URL)"'
 endif
 
 ifeq ($(RELEASE),1)

@@ -82,7 +82,7 @@ error:
 	if (!concat_expand(&output->text, str)) goto label
 #define append_escape(str, label) \
 	if (!concat_expand_escape(&output->text, str)) goto label
-enum serve_result serve_directory(const struct server_config *cls, struct input_data *input, struct output_data *output) {
+enum serve_result serve_directory(server_config cls, struct input_data *input, struct output_data *output) {
 	if (!input->file.dir) return serve_not_found;
 	if (!cls->list_directories) return serve_not_found; // directory listing not allowed
 	cJSON *dir_array = NULL;                            // array of directory children
@@ -153,11 +153,12 @@ enum serve_result serve_directory(const struct server_config *cls, struct input_
 
 	if (output->response_type == OUT_HTML) {
 		append("</ul>", server_error);
-		if (!construct_html_end(&output->text)) goto server_error;
+		if (!construct_html_end(&output->text, cls)) goto server_error;
 	}
 
+	if (!append_footer(cls, output)) goto server_error;
+
 	if (output->response_type != OUT_JSON) {
-		append("\n", server_error);
 		output->data_memory = MHD_RESPMEM_MUST_FREE;
 		output->size = strlen(output->text);
 	}
@@ -165,5 +166,5 @@ enum serve_result serve_directory(const struct server_config *cls, struct input_
 
 server_error:
 	if (output->data) free(output->data); // free the data if it was allocated
-	return serve_not_found;
+	return serve_error;
 }

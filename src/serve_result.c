@@ -9,7 +9,7 @@
 	if (!concat_expand(&output->text, str)) goto label
 #define append_escape(str, label) \
 	if (!concat_expand_escape(&output->text, str)) goto label
-enum serve_result serve_result(const struct server_config *cls, struct input_data *input, struct output_data *output) {
+enum serve_result serve_result(server_config cls, struct input_data *input, struct output_data *output) {
 	if (!output->data) { // if there is no data to respond with
 		output->size = 0;
 
@@ -47,7 +47,7 @@ enum serve_result serve_result(const struct server_config *cls, struct input_dat
 					append_escape(status_name, server_error);
 					if (!construct_html_main(&output->text)) goto server_error;
 					append("<p><a class=\"main-page\" href=\"/\">Main Page</a></p>\n", server_error);
-					if (!construct_html_end(&output->text)) goto server_error;
+					if (!construct_html_end(&output->text, cls)) goto server_error;
 					break;
 				case OUT_JSON:;
 					// set status code in JSON
@@ -63,6 +63,8 @@ enum serve_result serve_result(const struct server_config *cls, struct input_dat
 					append("\n", server_error);
 					break;
 			}
+
+			if (!append_footer(cls, output)) goto server_error;
 
 			if (output->data) output->size = strlen(output->data);
 		}

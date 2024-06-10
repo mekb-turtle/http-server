@@ -100,7 +100,7 @@ void close_file(struct file_detail *file_detail) {
 bool open_file(
         char *filepath,
         struct file_detail *out,
-        const struct server_config *cls,
+        server_config cls,
         bool open) {
 	if (!filepath) return false;
 
@@ -162,7 +162,7 @@ no_file:
 	return false;
 }
 
-bool valid_filename_n(const char *name, size_t len, const struct server_config *cls) {
+bool valid_filename_n(const char *name, size_t len, server_config cls) {
 	if (len > 0 && name[0] == '.') {
 		if (!cls->dotfiles)
 			return false; // skip dotfiles
@@ -181,7 +181,7 @@ bool valid_filename_n(const char *name, size_t len, const struct server_config *
 	return true;
 }
 
-bool valid_filename(const char *name, const struct server_config *cls) {
+bool valid_filename(const char *name, server_config cls) {
 	return valid_filename_n(name, strlen(name), cls);
 }
 
@@ -238,11 +238,35 @@ bool WARN_UNUSED construct_html_main(char **base) {
 	return concat_expand(base, "</h1><hr/><div class=\"main\">\n");
 }
 
-bool WARN_UNUSED construct_html_end(char **base) {
-	return concat_expand(base, "\n</div><hr/></body></html>");
+bool WARN_UNUSED construct_html_end(char **base, server_config cls) {
+	if (!concat_expand(base, "\n</div><hr/>")) return false;
+	if (cls->show_footer) {
+		if (!concat_expand(base, "<footer><p>Running <a href=\"")) return false;
+		if (!concat_expand_escape(base, URL)) return false;
+		if (!concat_expand(base, "\">")) return false;
+		if (!concat_expand_escape(base, TARGET)) return false;
+		if (!concat_expand(base, "</a> ")) return false;
+		if (!concat_expand_escape(base, VERSION)) return false;
+		if (!concat_expand(base, "</p></footer>")) return false;
+	}
+	if (!concat_expand(base, "</body></html>")) return false;
+	return true;
 }
 
-#include "serve_file.h"
+bool WARN_UNUSED append_footer(server_config cls, struct output_data *output) {
+	switch (output->response_type) {
+		case OUT_TEXT:
+			if (!concat_expand(&output->text, "\nRunning ")) return false;
+			if (!concat_expand_escape(&output->text, TARGET)) return false;
+			if (!concat_expand(&output->text, " ")) return false;
+			if (!concat_expand_escape(&output->text, VERSION)) return false;
+			if (!concat_expand(&output->text, "\n")) return false;
+			break;
+		default:
+			break;
+	}
+	return true;
+}
 
 static void ensure_path_slash(char *path, char slash) {
 	if (path[0] != '\0') return;
@@ -276,7 +300,7 @@ enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connecti
 	bool not_found = false; // for custom 404 page
 
 	// get server config data
-	const struct server_config *cls = (const struct server_config *) cls_;
+	server_config cls = (server_config) cls_;
 
 	if (strcmp(method, MHD_HTTP_METHOD_GET) != 0) {
 		output.status = MHD_HTTP_METHOD_NOT_ALLOWED;

@@ -12,15 +12,15 @@
 
 #include "attribute.h"
 
-struct server_config {
+typedef const struct server_config {
 	char *base_file;
 	char *not_found_file;
 	bool dotfiles;
 	bool follow_symlinks;
 	bool list_directories;
 	bool quiet;
-	bool show_server_info;
-};
+	bool show_footer;
+} *server_config;
 
 extern enum MHD_Result answer_to_connection(void *cls, struct MHD_Connection *connection,
                                             const char *url,
@@ -38,14 +38,14 @@ struct file_detail {
 
 #include "file_cache.h"
 
-extern bool valid_filename_n(const char *name, size_t len, const struct server_config *cls);
-extern bool valid_filename(const char *name, const struct server_config *cls);
+extern bool valid_filename_n(const char *name, size_t len, server_config cls);
+extern bool valid_filename(const char *name, server_config cls);
 
 extern void close_file(struct file_detail *file_detail);
 extern bool open_file(
         char *filepath,
         struct file_detail *out,
-        const struct server_config *cls,
+        server_config cls,
         bool open);
 
 extern size_t get_file_size(struct file_detail file);
@@ -54,7 +54,7 @@ extern bool cjson_add_file_details(cJSON *obj, struct file_detail st, char *url,
 extern bool WARN_UNUSED construct_html_head(char **base);
 extern bool WARN_UNUSED construct_html_body(char **base, char *title_class);
 extern bool WARN_UNUSED construct_html_main(char **base);
-extern bool WARN_UNUSED construct_html_end(char **base);
+extern bool WARN_UNUSED construct_html_end(char **base, server_config cls);
 #define TITLE_START "<title>"
 #define TITLE_END "</title>"
 
@@ -66,7 +66,7 @@ struct output_data {
 	enum MHD_ResponseMemoryMode data_memory;
 	size_t size;
 	unsigned int status;
-	char *content_type; // derived from response_type or set manually from file
+	const char *content_type; // derived from response_type or set manually from file
 	cJSON *json_root;
 	enum response_type {
 		OUT_NONE,
@@ -91,5 +91,7 @@ enum serve_result {
 	serve_not_found,
 	serve_ok
 };
+
+extern bool WARN_UNUSED append_footer(server_config cls, struct output_data *output);
 
 #endif

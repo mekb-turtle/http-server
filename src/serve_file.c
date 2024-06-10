@@ -9,7 +9,7 @@
 	if (!concat_expand(&output->text, str)) goto label
 #define append_escape(str, label) \
 	if (!concat_expand_escape(&output->text, str)) goto label
-enum serve_result serve_file(const struct server_config *cls, struct input_data *input, struct output_data *output) {
+enum serve_result serve_file(server_config cls, struct input_data *input, struct output_data *output) {
 	if (!input->file.fp) return serve_not_found;
 	enum cache_result result = get_file_cached(&input->file, true);
 	switch (result) {
@@ -72,14 +72,15 @@ enum serve_result serve_file(const struct server_config *cls, struct input_data 
 				append("</span>", server_error);
 			}
 			append("</p>\n", server_error);
-			if (!construct_html_end(&output->text)) goto server_error;
-			output->size = strlen(output->text);
+			if (!construct_html_end(&output->text, cls)) goto server_error;
 			break;
 		case OUT_JSON:;
 			cjson_add_file_details(output->json_root, input->file, input->url, NULL);
 			break;
 	}
 	free(size_format);
+	if (!append_footer(cls, output)) goto server_error;
+	if (output->response_type == OUT_HTML) output->size = strlen(output->text);
 	return serve_ok;
 server_error:
 	if (output->data && output->data != file_data->data) free(output->data); // free the data if it was allocated
