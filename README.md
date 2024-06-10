@@ -10,8 +10,8 @@ Simple HTTP server that serves files from a directory. It is written in C using 
     - libmicrohttpd (arch: `libmicrohttpd`, debian: `libmicrohttpd-dev`)
     - cJSON (arch: `cjson`, debian: `libcjson-dev`)
     - libmagic (arch: `file`, debian: `libmagic-dev`)
-    - ```sudo pacman -S libmicrohttpd cjson file```
-    - ```sudo apt install libmicrohttpd-dev libcjson-dev libmagic-dev```
+    -     sudo pacman -S libmicrohttpd cjson file
+    -     sudo apt install libmicrohttpd-dev libcjson-dev libmagic-dev
 2. Run `make`
 3. Binary will be created in `build/*/bin/`
 
