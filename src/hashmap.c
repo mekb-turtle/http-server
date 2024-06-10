@@ -27,6 +27,8 @@ static void free_entry_kv(struct hashmap_entry *entry, struct hashmap *map) {
 	// free key and value
 	if (entry->key && map->free_key) map->free_key(entry->key);
 	if (entry->value && map->free_value) map->free_value(entry->value);
+	entry->key = NULL;
+	entry->value = NULL;
 }
 
 static void free_entry(struct hashmap_entry *entry, struct hashmap *map) {
