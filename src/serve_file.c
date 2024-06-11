@@ -27,6 +27,8 @@ enum serve_result serve_file(server_config cls, struct input_data *input, struct
 	snprintf(size_str, 32, "%li", file_data->size);
 	char *size_format = format_bytes(file_data->size, binary_i);
 
+	bool has_back = !input->is_root_url && cls->list_directories;
+
 	switch (output->response_type) {
 		case OUT_NONE:
 		case OUT_TEXT:
@@ -42,17 +44,24 @@ enum serve_result serve_file(server_config cls, struct input_data *input, struct
 			append_escape(input->url, server_error);
 			append(TITLE_END, server_error);
 			if (!construct_html_body(&output->text, NULL)) goto server_error;
-			append("<a title=\"Back\" href=\"", server_error);
-			append_escape(input->url_parent, server_error);
-			append("\">&laquo;</a> ", server_error);
+			if (has_back) {
+				append("<a title=\"Back\" href=\"", server_error);
+				append_escape(input->url_parent, server_error);
+				append("\">&laquo;</a> ", server_error);
+			}
 			append_escape(input->url, server_error);
 			if (!construct_html_main(&output->text)) goto server_error;
-			append("<p><a href=\"", server_error);
-			append_escape(input->url_parent, server_error);
-			append("\">Back</a> - <a href=\"", server_error);
+			append("<p>", server_error);
+			if (has_back) {
+				append("<a href=\"", server_error);
+				append_escape(input->url_parent, server_error);
+				append("\">Back</a> - ", server_error);
+			}
+			append("<a href=\"", server_error);
 			append_escape(input->url, server_error);
 			append_escape("?output=raw", server_error);
-			append("\">Raw</a> - <a href=\"", server_error);
+			append("\">Raw</a> - ", server_error);
+			append("<a href=\"", server_error);
 			append_escape(input->url, server_error);
 			append_escape("?download=true", server_error);
 			append("\">Download</a> - ", server_error);

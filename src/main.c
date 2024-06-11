@@ -180,7 +180,13 @@ int main(int argc, char *argv[]) {
 		return 1;
 	}
 
-	if (chdir(config.base_file) != 0) {
+	// stat base file
+	struct stat st;
+	if (stat(config.base_file, &st) != 0) {
+		eprintf("Failed to stat %s\n", config.base_file);
+		return 1;
+	}
+	if (S_ISDIR(st.st_mode) && chdir(config.base_file) != 0) {
 		eprintf("Failed to change directory to %s\n", config.base_file);
 		return 1;
 	}
