@@ -152,7 +152,7 @@ int main(int argc, char *argv[]) {
 	char *filename_ = optind == argc - 1 ? argv[optind] : ".";
 	char filename[PATH_MAX];
 	if (!realpath(filename_, filename)) {
-		eprintf("Base path: %s\n", filename_);
+		eprintf("Invalid base path: %s\n", filename_);
 		return 1;
 	}
 
@@ -183,7 +183,7 @@ int main(int argc, char *argv[]) {
 	// stat base file
 	struct stat st;
 	if (stat(config.base_file, &st) != 0) {
-		eprintf("Failed to stat %s\n", config.base_file);
+		eprintf("Invalid base path: %s\n", config.base_file);
 		return 1;
 	}
 	if (S_ISDIR(st.st_mode) && chdir(config.base_file) != 0) {
