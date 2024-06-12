@@ -92,7 +92,7 @@ enum serve_result serve_file(server_config cls, struct input_data *input, struct
 				append("<hr/>", server_error);
 				append("<div class=\"wrap\">", server_error);
 				append("<pre class=\"file-text-data\">", server_error);
-				append_escape(file_data->data, server_error);
+				if (!concat_expand_escape_n(&output->text, file_data->data, file_data->size)) goto server_error;
 				append("</pre>", server_error);
 				append("</div>", server_error);
 			}

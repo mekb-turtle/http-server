@@ -142,7 +142,6 @@ enum cache_result get_file_cached(
 				if (*encoding != '\0') {
 					if (strcmp(encoding, "binary") == 0) {
 						// "binary" is not a valid encoding for HTTP responses
-						cache_item->mime_encoding = NULL; // set encoding to NULL
 						cache_item->mime = mime_type;     // trim encoding as it's invalid
 					} else {
 						cache_item->mime_encoding = encoding;
