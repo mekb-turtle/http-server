@@ -23,7 +23,8 @@ The server supports directory listing and file preview.
   - [x] File caching
 - [x] Directory listing
 - [ ] File preview
-  - [ ] Text
+  - [x] Text
+    - [ ] Convert non-UTF8 text to UTF8
     - [ ] Syntax highlighting
   - [ ] Images
   - [ ] Audio
