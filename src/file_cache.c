@@ -120,6 +120,7 @@ enum cache_result get_file_cached(
 	cache_item->mime_encoding = NULL;
 	cache_item->mime = magic_buffer(magic_cookie, cache_item->data, cache_item->size);
 	cache_item->is_binary = true; // assume binary unless encoding is specified
+	cache_item->is_utf8 = false;
 
 	if (cache_item->mime) {
 		// find the MIME type
@@ -146,6 +147,8 @@ enum cache_result get_file_cached(
 					} else {
 						cache_item->mime_encoding = encoding;
 						cache_item->is_binary = false;
+						if (strcmp(encoding, "utf-8") == 0) cache_item->is_utf8 = true;
+						else if (strcmp(encoding, "us-ascii") == 0) cache_item->is_utf8 = true;
 					}
 				}
 			}

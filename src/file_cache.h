@@ -9,6 +9,7 @@ struct file_cache_item {
 	const char *mime;
 	char *mime_type;
 	const char *mime_encoding;
+	bool is_utf8;
 };
 enum cache_result {
 	cache_file_not_found = 0,

@@ -86,11 +86,15 @@ enum serve_result serve_file(server_config cls, struct input_data *input, struct
 			} else {
 				append("Text", server_error);
 			}
-			append("</span></p><hr/>", server_error);
-			if (!file_data->is_binary) {
-				append("<div class=\"wrap\"><pre class=\"file-text-data\">", server_error);
+			append("</span></p>", server_error);
+			if (file_data->is_utf8) {
+				// TODO: convert non-UTF-8 text files to UTF-8 to display
+				append("<hr/>", server_error);
+				append("<div class=\"wrap\">", server_error);
+				append("<pre class=\"file-text-data\">", server_error);
 				append_escape(file_data->data, server_error);
-				append("</pre></div>", server_error);
+				append("</pre>", server_error);
+				append("</div>", server_error);
 			}
 			if (!construct_html_end(&output->text, cls)) goto server_error;
 			break;
