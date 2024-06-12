@@ -86,6 +86,7 @@ enum serve_result serve_directory(server_config cls, struct input_data *input, s
 	if (!input->file.dir) return serve_not_found;
 	if (!cls->list_directories) return serve_not_found; // directory listing not allowed
 	cJSON *dir_array = NULL;                            // array of directory children
+	bool has_parent_dir = !input->is_root_url;
 	switch (output->response_type) {
 		case OUT_NONE:
 		case OUT_TEXT:
@@ -101,6 +102,11 @@ enum serve_result serve_directory(server_config cls, struct input_data *input, s
 			append_escape(input->url, server_error);
 			append(TITLE_END, server_error);
 			if (!construct_html_body(&output->text, NULL)) goto server_error;
+			if (has_parent_dir) {
+				append("<a title=\"Parent directory\" href=\"", server_error);
+				append_escape(input->url_parent, server_error);
+				append("\">&laquo;</a> ", server_error);
+			}
 			append_escape("Index of ", server_error);
 			append_escape(input->url, server_error);
 			if (!construct_html_main(&output->text)) goto server_error;
@@ -114,7 +120,7 @@ enum serve_result serve_directory(server_config cls, struct input_data *input, s
 	}
 
 	bool res;
-	if (!input->is_root_url) {
+	if (has_parent_dir) {
 		// add parent directory link
 		struct file_detail parent_file = {.dir = NULL, .fp = NULL};
 		if (open_file(input->filepath_parent, &parent_file, cls, true)) {
