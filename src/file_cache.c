@@ -115,10 +115,11 @@ enum cache_result get_file_cached(
 	// check the file is at EOF
 	if (fgetc(file->fp) != EOF) goto read_error;
 
-	// TODO: determine if the file is binary (probably by checking for NULL bytes)
-
 	// determine the MIME type using libmagic
+	cache_item->mime_type = NULL;
+	cache_item->mime_encoding = NULL;
 	cache_item->mime = magic_buffer(magic_cookie, cache_item->data, cache_item->size);
+	cache_item->is_binary = true; // assume binary unless encoding is specified
 
 	if (cache_item->mime) {
 		// find the MIME type
@@ -133,11 +134,21 @@ enum cache_result get_file_cached(
 		cache_item->mime_type = mime_type;
 
 		// parse the MIME type
-		const char *encoding = strchr(cache_item->mime, ';');
-		if (encoding) {
-			++encoding;                          // skip the semicolon
-			while (*encoding == ' ') ++encoding; // skip leading spaces
-			if (*encoding != '\0') cache_item->mime_encoding = encoding;
+		const char *encoding;
+		if ((encoding = strchr(cache_item->mime, ';'))) {
+			if ((encoding = strchr(encoding, '='))) { // magic always returns "x/x; charset=x" for MAGIC_MIME
+				++encoding;
+				if (*encoding != '\0') {
+					if (strcmp(encoding, "binary") == 0) {
+						// "binary" is not a valid encoding for HTTP responses
+						cache_item->mime_encoding = NULL; // set encoding to NULL
+						cache_item->mime = mime_type;     // trim encoding as it's invalid
+					} else {
+						cache_item->mime_encoding = encoding;
+						cache_item->is_binary = false;
+					}
+				}
+			}
 		}
 	}
 

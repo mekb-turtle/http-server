@@ -71,16 +71,27 @@ enum serve_result serve_file(server_config cls, struct input_data *input, struct
 			append_escape(size_format, server_error);
 			append("</span>", server_error);
 			if (file_data->mime_type) {
-				append(" - <span class=\"file-size\" title=\"Content Type\">", server_error);
+				append(" - <span class=\"file-content-type\" title=\"Content Type\">", server_error);
 				append_escape(file_data->mime_type, server_error);
 				append("</span>", server_error);
 			}
 			if (file_data->mime_encoding) {
-				append(" - <span class=\"file-size\" title=\"Content Type\">", server_error);
+				append(" - <span class=\"file-content-encoding\" title=\"Content Encoding\">", server_error);
 				append_escape(file_data->mime_encoding, server_error);
 				append("</span>", server_error);
 			}
-			append("</p>\n", server_error);
+			append(" - <span class=\"file-binary\">", server_error);
+			if (file_data->is_binary) {
+				append("Binary", server_error);
+			} else {
+				append("Text", server_error);
+			}
+			append("</span></p><hr/>", server_error);
+			if (!file_data->is_binary) {
+				append("<div class=\"wrap\"><pre class=\"file-text-data\">", server_error);
+				append_escape(file_data->data, server_error);
+				append("</pre></div>", server_error);
+			}
 			if (!construct_html_end(&output->text, cls)) goto server_error;
 			break;
 		case OUT_JSON:;
