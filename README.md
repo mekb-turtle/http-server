@@ -25,6 +25,7 @@ The server supports directory listing and file preview.
 - [ ] File preview
   - [x] Text
     - [ ] Convert non-UTF8 text to UTF8
+    - [ ] Line numbers
     - [ ] Syntax highlighting
   - [ ] Images
   - [ ] Audio
