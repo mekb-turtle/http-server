@@ -394,8 +394,8 @@ not_found:
 	}
 	goto respond;
 server_error:
-	exit(EXIT_FAILURE);
-
+	output.status = MHD_HTTP_INTERNAL_SERVER_ERROR;
+	goto respond;
 too_long:
 	output.status = MHD_HTTP_URI_TOO_LONG;
 	goto respond;

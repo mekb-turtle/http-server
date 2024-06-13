@@ -65,15 +65,16 @@ char *WARN_UNUSED concat_expand_char(char **base, char add) {
 
 char *WARN_UNUSED concat_expand_escape_func_n(
         char **base, const char *add, size_t input_len,
-        void (*pre_line)(void *), void *pre_line_arg,
-        void (*post_line)(void *), void *post_line_arg) {
+        line_func pre_line, void *pre_line_arg,
+        line_func post_line, void *post_line_arg) {
 	size_t bulk_i = 0;
 	char hex[16];
 	bool new_line = true;
 	for (size_t i = 0;; ++i) {
 		if (new_line) {
 			// start of the line
-			if (pre_line) pre_line(pre_line_arg);
+			if (pre_line)
+				if (!pre_line(pre_line_arg, base, false)) return NULL;
 			new_line = false;
 		}
 		char *escaped = NULL;
@@ -110,7 +111,8 @@ char *WARN_UNUSED concat_expand_escape_func_n(
 		}
 		if (i == input_len || new_line) {
 			// end of the line
-			if (post_line) post_line(post_line_arg);
+			if (post_line)
+				if (!post_line(post_line_arg, base, true)) return NULL;
 		}
 		if (i >= input_len) break; // end of string
 		bulk_i = i + 1;            // set the start position of the next bulk data
@@ -122,15 +124,15 @@ char *WARN_UNUSED concat_expand_escape_func_n(
 
 char *WARN_UNUSED concat_expand_escape_func(
         char **base, const char *add,
-        void (*pre_line)(void *), void *pre_line_arg,
-        void (*post_line)(void *), void *post_line_arg) {
+        line_func pre_line, void *pre_line_arg,
+        line_func post_line, void *post_line_arg) {
 	return concat_expand_escape_func_n(base, add, strlen(add), pre_line, pre_line_arg, post_line, post_line_arg);
 }
 
 char *WARN_UNUSED concat_expand_escape_func_char(
         char **base, char add,
-        void (*pre_line)(void *), void *pre_line_arg,
-        void (*post_line)(void *), void *post_line_arg) {
+        line_func pre_line, void *pre_line_arg,
+        line_func post_line, void *post_line_arg) {
 	return concat_expand_escape_func_n(base, &add, 1, pre_line, pre_line_arg, post_line, post_line_arg);
 }
 

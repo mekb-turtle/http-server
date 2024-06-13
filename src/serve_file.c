@@ -5,6 +5,10 @@
 #include "util.h"
 #include "format_bytes.h"
 
+// later in the code
+static bool pre_line(void *, char **base, bool end);
+static bool post_line(void *, char **base, bool end);
+
 #define append(str, label) \
 	if (!concat_expand(&output->text, str)) goto label
 #define append_escape(str, label) \
@@ -92,7 +96,8 @@ enum serve_result serve_file(server_config cls, struct input_data *input, struct
 				append("<hr/>", server_error);
 				append("<div class=\"wrap\">", server_error);
 				append("<pre class=\"file-text-data\">", server_error);
-				if (!concat_expand_escape_n(&output->text, file_data->data, file_data->size)) goto server_error;
+				if (!concat_expand_escape_func_n(&output->text, file_data->data, file_data->size,
+				                                 pre_line, &output->text, post_line, &output->text)) goto server_error;
 				append("</pre>", server_error);
 				append("</div>", server_error);
 			}
@@ -110,4 +115,14 @@ server_error:
 	if (output->data && output->data != file_data->data) free(output->data); // free the data if it was allocated
 	free(size_format);
 	return serve_error;
+}
+
+static bool pre_line(void *, char **base, bool end) {
+	// TODO
+	return true;
+}
+
+static bool post_line(void *, char **base, bool end) {
+	// TODO
+	return true;
 }

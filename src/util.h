@@ -1,6 +1,7 @@
 #ifndef UTIL_H
 #define UTIL_H
 #include <stddef.h>
+#include <stdbool.h>
 #include "attribute.h"
 extern char *strchrnul_(const char *s, int c);
 
@@ -13,18 +14,20 @@ extern char *WARN_UNUSED concat_expand_n(char **base, const char *add, size_t ad
 extern char *WARN_UNUSED concat_expand(char **base, const char *add);
 extern char *WARN_UNUSED concat_expand_char(char **base, char add);
 
+typedef bool (*line_func)(void *, char **base, bool);
+
 extern char *WARN_UNUSED concat_expand_escape_func_n(
         char **base, const char *add, size_t input_len,
-        void (*pre_line)(void *), void *pre_line_arg,
-        void (*post_line)(void *), void *post_line_arg);
+        line_func pre_line, void *pre_line_arg,
+        line_func post_line, void *post_line_arg);
 extern char *WARN_UNUSED concat_expand_escape_func(
         char **base, const char *add,
-        void (*pre_line)(void *), void *pre_line_arg,
-        void (*post_line)(void *), void *post_line_arg);
+        line_func pre_line, void *pre_line_arg,
+        line_func post_line, void *post_line_arg);
 extern char *WARN_UNUSED concat_expand_escape_func_char(
         char **base, char add,
-        void (*pre_line)(void *), void *pre_line_arg,
-        void (*post_line)(void *), void *post_line_arg);
+        line_func pre_line, void *pre_line_arg,
+        line_func post_line, void *post_line_arg);
 
 extern char *WARN_UNUSED concat_expand_escape_n(char **base, const char *add, size_t input_len);
 extern char *WARN_UNUSED concat_expand_escape(char **base, const char *add);
