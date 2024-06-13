@@ -17,6 +17,21 @@ Simple HTTP server that serves files from a directory. It is written in C using 
 
 The server supports directory listing and file preview.
 
+#### Preview:
+
+<details>
+<summary>Directory Listing</summary>
+
+![Directory Listing](assets/directory-listing.png)
+
+</details>
+<details>
+<summary>Text Preview</summary>
+
+![Text Preview](assets/text-preview.png)
+
+</details>
+
 #### Working on:
 
 - [x] Read files from disk to serve
