@@ -5,10 +5,10 @@
 #include "util.h"
 #include "format_bytes.h"
 
-#define append(str, label) \
-	if (!concat_expand(data, str)) goto label
-#define append_escape(str, label) \
-	if (!concat_expand_escape(data, str)) goto label
+#define append(str) \
+	if (!concat_expand(data, str)) goto error
+#define append_escape(str) \
+	if (!concat_expand_escape(data, str)) goto error
 static bool add_dir_item(enum response_type response_type, char **data, struct file_detail file, char *url, char *name, cJSON *dir_array, char *class, char *custom_type) {
 	if (!custom_type) {
 		if (file.dir)
@@ -27,40 +27,40 @@ static bool add_dir_item(enum response_type response_type, char **data, struct f
 	switch (response_type) {
 		case OUT_NONE:
 		case OUT_TEXT:
-			if (!concat_expand(data, "- ")) goto error;
-			if (!concat_expand(data, name)) goto error;
-			if (!concat_expand(data, " - ")) goto error;
-			if (!concat_expand(data, custom_type)) goto error;
+			append("- ");
+			append(name);
+			append(" - ");
+			append(custom_type);
 			if (file.fp) {
-				if (!concat_expand(data, " - ")) goto error;
-				if (!concat_expand(data, size_format)) goto error;
+				append(" - ");
+				append(size_format);
 			}
-			if (!concat_expand(data, "\n")) goto error;
+			append("\n");
 			break;
 		case OUT_HTML:
-			if (!concat_expand(data, "<li class=\"file-item")) goto error;
+			append("<li class=\"file-item");
 			if (class && class[0] != '\0') {
-				if (!concat_expand(data, " ")) goto error;
-				if (!concat_expand_escape(data, class)) goto error;
+				append(" ");
+				append_escape(class);
 			}
-			if (!concat_expand(data, "\"><a href=\"")) goto error;
-			if (!concat_expand_escape(data, url)) goto error;
-			if (!concat_expand(data, "\" title=\"")) goto error;
-			if (!concat_expand_escape(data, url)) goto error;
-			if (!concat_expand(data, "\">")) goto error;
-			if (!concat_expand_escape(data, name)) goto error;
-			if (!concat_expand(data, "</a>")) goto error;
-			if (!concat_expand(data, " - <span class=\"file-type\">")) goto error;
-			if (!concat_expand_escape(data, custom_type)) goto error;
-			if (!concat_expand(data, "</span>")) goto error;
+			append("\"><a href=\"");
+			append_escape(url);
+			append("\" title=\"");
+			append_escape(url);
+			append("\">");
+			append_escape(name);
+			append("</a>");
+			append(" - <span class=\"file-type\">");
+			append_escape(custom_type);
+			append("</span>");
 			if (file.fp) {
-				if (!concat_expand(data, " - <span class=\"file-size\" title=\"")) goto error;
-				if (!concat_expand_escape(data, size_str)) goto error;
-				if (!concat_expand(data, " bytes\">")) goto error;
-				if (!concat_expand_escape(data, size_format)) goto error;
-				if (!concat_expand(data, "</span>")) goto error;
+				append(" - <span class=\"file-size\" title=\"");
+				append_escape(size_str);
+				append(" bytes\">");
+				append_escape(size_format);
+				append("</span>");
 			}
-			if (!concat_expand(data, "</li>\n")) goto error;
+			append("</li>\n");
 			break;
 		case OUT_JSON:;
 			cJSON *obj = cJSON_CreateObject();
@@ -78,39 +78,33 @@ error:
 #undef append
 #undef append_escape
 
-#define append(str, label) \
-	if (!concat_expand(&output->text, str)) goto label
-#define append_escape(str, label) \
-	if (!concat_expand_escape(&output->text, str)) goto label
+#define append(str) \
+	if (!concat_expand(&output->text, str)) goto server_error
+#define append_escape(str) \
+	if (!concat_expand_escape(&output->text, str)) goto server_error
 enum serve_result serve_directory(server_config cls, struct input_data *input, struct output_data *output) {
 	if (!input->file.dir) return serve_not_found;
 	if (!cls->list_directories) return serve_not_found; // directory listing not allowed
 	cJSON *dir_array = NULL;                            // array of directory children
-	bool has_parent_dir = !input->is_root_url;
 	switch (output->response_type) {
 		case OUT_NONE:
 		case OUT_TEXT:
 			output->response_type = OUT_TEXT;
-			append("Index of ", server_error);
-			append(input->url, server_error);
-			append("\n\n", server_error);
+			append("Index of ");
+			append(input->url);
+			append("\n\n");
 			break;
 		case OUT_HTML:
-			if (!construct_html_head(&output->text)) goto server_error;
-			append(TITLE_START, server_error);
-			append_escape("Index of ", server_error);
-			append_escape(input->url, server_error);
-			append(TITLE_END, server_error);
-			if (!construct_html_body(&output->text, NULL)) goto server_error;
-			if (has_parent_dir) {
-				append("<a title=\"Parent directory\" href=\"", server_error);
-				append_escape(input->url_parent, server_error);
-				append("\">&laquo;</a> ", server_error);
-			}
-			append_escape("Index of ", server_error);
-			append_escape(input->url, server_error);
-			if (!construct_html_main(&output->text)) goto server_error;
-			append("<ul>\n", server_error);
+			if (!construct_html_head(cls, input, output)) goto server_error;
+			append(TITLE_START);
+			append_escape("Index of ");
+			append_escape(input->url);
+			append(TITLE_END);
+			if (!construct_html_body(cls, input, output, NULL, "Parent Directory")) goto server_error;
+			append_escape("Index of ");
+			append_escape(input->url);
+			if (!construct_html_main(cls, input, output)) goto server_error;
+			append("<ul>\n");
 			break;
 		case OUT_JSON:
 			dir_array = cJSON_CreateArray();
@@ -120,7 +114,7 @@ enum serve_result serve_directory(server_config cls, struct input_data *input, s
 	}
 
 	bool res;
-	if (has_parent_dir) {
+	if (has_parent_url(cls, input)) {
 		// add parent directory link
 		struct file_detail parent_file = {.dir = NULL, .fp = NULL};
 		if (open_file(input->filepath_parent, &parent_file, cls, true)) {
@@ -158,11 +152,11 @@ enum serve_result serve_directory(server_config cls, struct input_data *input, s
 	}
 
 	if (output->response_type == OUT_HTML) {
-		append("</ul>", server_error);
-		if (!construct_html_end(&output->text, cls)) goto server_error;
+		append("</ul>");
+		if (!construct_html_end(cls, input, output)) goto server_error;
 	}
 
-	if (!append_footer(cls, output)) goto server_error;
+	if (!append_text_footer(cls, output)) goto server_error;
 
 	if (output->response_type != OUT_JSON) {
 		output->data_memory = MHD_RESPMEM_MUST_FREE;

@@ -9,10 +9,10 @@
 static bool pre_line(void *, char **base, bool end);
 static bool post_line(void *, char **base, bool end);
 
-#define append(str, label) \
-	if (!concat_expand(&output->text, str)) goto label
-#define append_escape(str, label) \
-	if (!concat_expand_escape(&output->text, str)) goto label
+#define append(str) \
+	if (!concat_expand(&output->text, str)) goto server_error
+#define append_escape(str) \
+	if (!concat_expand_escape(&output->text, str)) goto server_error
 enum serve_result serve_file(server_config cls, struct input_data *input, struct output_data *output) {
 	if (!input->file.fp) return serve_not_found;
 	enum cache_result result = get_file_cached(&input->file, true);
@@ -31,8 +31,6 @@ enum serve_result serve_file(server_config cls, struct input_data *input, struct
 	snprintf(size_str, 32, "%li", file_data->size);
 	char *size_format = format_bytes(file_data->size, binary_i);
 
-	bool has_back = !input->is_root_url && cls->list_directories;
-
 	switch (output->response_type) {
 		case OUT_NONE:
 		case OUT_TEXT:
@@ -43,72 +41,69 @@ enum serve_result serve_file(server_config cls, struct input_data *input, struct
 			break;
 		case OUT_HTML:
 			output->data_memory = MHD_RESPMEM_MUST_FREE;
-			if (!construct_html_head(&output->text)) goto server_error;
-			append(TITLE_START, server_error);
-			append_escape(input->url, server_error);
-			append(TITLE_END, server_error);
-			if (!construct_html_body(&output->text, NULL)) goto server_error;
-			if (has_back) {
-				append("<a title=\"Back\" href=\"", server_error);
-				append_escape(input->url_parent, server_error);
-				append("\">&laquo;</a> ", server_error);
+			if (!construct_html_head(cls, input, output)) goto server_error;
+			append(TITLE_START);
+			append_escape(input->url);
+			append(TITLE_END);
+			if (!construct_html_body(cls, input, output, NULL, "Back")) goto server_error;
+			append_escape(input->url);
+			if (!construct_html_main(cls, input, output)) goto server_error;
+			append("<p>");
+			if (has_parent_url(cls, input)) {
+				append("<a href=\"");
+				append_escape(input->url_parent);
+				append("\">Back</a> - ");
 			}
-			append_escape(input->url, server_error);
-			if (!construct_html_main(&output->text)) goto server_error;
-			append("<p>", server_error);
-			if (has_back) {
-				append("<a href=\"", server_error);
-				append_escape(input->url_parent, server_error);
-				append("\">Back</a> - ", server_error);
-			}
-			append("<a href=\"", server_error);
-			append_escape(input->url, server_error);
-			append_escape("?output=raw", server_error);
-			append("\">Raw</a> - ", server_error);
-			append("<a href=\"", server_error);
-			append_escape(input->url, server_error);
-			append_escape("?download=true", server_error);
-			append("\">Download</a> - ", server_error);
-			append("<span class=\"file-size\" title=\"", server_error);
-			append_escape(size_str, server_error);
-			append(" bytes\">", server_error);
-			append_escape(size_format, server_error);
-			append("</span>", server_error);
+			append("<a href=\"");
+			append_escape(input->url);
+			append_escape("?output=raw");
+			append("\">Raw</a> - ");
+			append("<a href=\"");
+			append_escape(input->url);
+			append_escape("?download=true");
+			append("\">Download</a> - ");
+			append("<span class=\"file-size\" title=\"");
+			append_escape(size_str);
+			append(" bytes\">");
+			append_escape(size_format);
+			append("</span>");
 			if (file_data->mime_type) {
-				append(" - <span class=\"file-content-type\" title=\"Content Type\">", server_error);
-				append_escape(file_data->mime_type, server_error);
-				append("</span>", server_error);
+				append(" - <span class=\"file-content-type\" title=\"Content Type\">");
+				append_escape(file_data->mime_type);
+				append("</span>");
 			}
 			if (file_data->mime_encoding) {
-				append(" - <span class=\"file-content-encoding\" title=\"Content Encoding\">", server_error);
-				append_escape(file_data->mime_encoding, server_error);
-				append("</span>", server_error);
+				append(" - <span class=\"file-content-encoding\" title=\"Content Encoding\">");
+				append_escape(file_data->mime_encoding);
+				append("</span>");
 			}
-			append(" - <span class=\"file-binary\">", server_error);
+			append(" - <span class=\"file-binary\">");
 			if (file_data->is_binary) {
-				append("Binary", server_error);
+				append("Binary");
 			} else {
-				append("Text", server_error);
+				append("Text");
 			}
-			append("</span></p>", server_error);
+			append("</span></p>");
 			if (file_data->is_utf8) {
 				// TODO: convert non-UTF-8 text files to UTF-8 to display
-				append("<hr/>", server_error);
-				append("<div class=\"wrap\">", server_error);
-				append("<pre class=\"file-text-data\">", server_error);
+				append("<div class=\"text-file\">"
+				       "<table class=\"text-file\">"
+				       "<tbody>");
+				int line_number = 0;
 				if (!concat_expand_escape_func_n(&output->text, file_data->data, file_data->size,
-				                                 pre_line, &output->text, post_line, &output->text)) goto server_error;
-				append("</pre>", server_error);
-				append("</div>", server_error);
+				                                 pre_line, &line_number, post_line, &line_number, false)) goto server_error;
+				append("</tbody>"
+				       "</table>"
+				       "</div>");
 			}
-			if (!construct_html_end(&output->text, cls)) goto server_error;
+			if (!construct_html_end(cls, input, output)) goto server_error;
 			break;
 		case OUT_JSON:;
 			cjson_add_file_details(output->json_root, input->file, input->url, NULL);
 			break;
 	}
 	free(size_format);
-	if (!append_footer(cls, output)) goto server_error;
+	if (!append_text_footer(cls, output)) goto server_error;
 	if (output->response_type == OUT_HTML) output->size = strlen(output->text);
 	return serve_ok;
 server_error:
@@ -117,12 +112,26 @@ server_error:
 	return serve_error;
 }
 
-static bool pre_line(void *, char **base, bool end) {
-	// TODO
+#undef append
+#undef append_escape
+#define append(str) \
+	if (!concat_expand(base, str)) return false
+#define append_escape(str) \
+	if (!concat_expand_escape(base, str)) return false
+
+static bool pre_line(void *line, char **base, bool end) {
+	append("<tr class=\"text-file line\">");
+	append("<td class=\"text-file line-number\">");
+	int *line_number = (int *) line;
+	char line_number_str[32];
+	snprintf(line_number_str, 32, "%i", ++*line_number);
+	append(line_number_str);
+	append("</td>");
+	append("<td class=\"text-file line-content\">");
 	return true;
 }
 
 static bool post_line(void *, char **base, bool end) {
-	// TODO
+	append("</td></tr>");
 	return true;
 }

@@ -5,10 +5,10 @@
 #include "util.h"
 #include "status_code.h"
 
-#define append(str, label) \
-	if (!concat_expand(&output->text, str)) goto label
-#define append_escape(str, label) \
-	if (!concat_expand_escape(&output->text, str)) goto label
+#define append(str) \
+	if (!concat_expand(&output->text, str)) goto server_error
+#define append_escape(str) \
+	if (!concat_expand_escape(&output->text, str)) goto server_error
 enum serve_result serve_result(server_config cls, struct input_data *input, struct output_data *output) {
 	if (!output->data) { // if there is no data to respond with
 		output->size = 0;
@@ -30,24 +30,30 @@ enum serve_result serve_result(server_config cls, struct input_data *input, stru
 				case OUT_NONE:
 				case OUT_TEXT:
 					output->response_type = OUT_TEXT;
-					append(status_num_str, server_error);
-					append(" - ", server_error);
-					append(status_name, server_error);
-					append("\n", server_error);
+					append(status_num_str);
+					append(" - ");
+					append(status_name);
+					append("\n");
 					break;
 				case OUT_HTML:
-					if (!construct_html_head(&output->text)) goto server_error;
-					append(TITLE_START, server_error);
-					append_escape("Index of ", server_error);
-					append_escape(input->url, server_error);
-					append(TITLE_END, server_error);
-					if (!construct_html_body(&output->text, is_error ? "error" : "ok")) goto server_error;
-					append_escape(status_num_str, server_error);
-					append_escape(" - ", server_error);
-					append_escape(status_name, server_error);
-					if (!construct_html_main(&output->text)) goto server_error;
-					append("<p><a class=\"main-page\" href=\"/\">Main Page</a></p>\n", server_error);
-					if (!construct_html_end(&output->text, cls)) goto server_error;
+					if (!construct_html_head(cls, input, output)) goto server_error;
+					append(TITLE_START);
+					append_escape("Index of ");
+					append_escape(input->url);
+					append(TITLE_END);
+					if (!construct_html_body(cls, input, output, is_error ? "error" : "ok", "Back")) goto server_error;
+					append_escape(status_num_str);
+					append_escape(" - ");
+					append_escape(status_name);
+					if (!construct_html_main(cls, input, output)) goto server_error;
+					append("<p>");
+					if (has_parent_url(cls, input)) {
+						append("<a href=\"");
+						append_escape(input->url_parent);
+						append("\">Back</a> - ");
+					}
+					append("<a class=\"main-page\" href=\"/\">Main Page</a></p>\n");
+					if (!construct_html_end(cls, input, output)) goto server_error;
 					break;
 				case OUT_JSON:;
 					// set status code in JSON
@@ -60,11 +66,11 @@ enum serve_result serve_result(server_config cls, struct input_data *input, stru
 					// encode JSON data and respond with it
 					output->data = cJSON_Print(output->json_root);
 					if (!output->data) goto server_error;
-					append("\n", server_error);
+					append("\n");
 					break;
 			}
 
-			if (!append_footer(cls, output)) goto server_error;
+			if (!append_text_footer(cls, output)) goto server_error;
 
 			if (output->data) output->size = strlen(output->data);
 		}

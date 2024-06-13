@@ -142,12 +142,13 @@ enum cache_result get_file_cached(
 				if (*encoding != '\0') {
 					if (strcmp(encoding, "binary") == 0) {
 						// "binary" is not a valid encoding for HTTP responses
-						cache_item->mime = mime_type;     // trim encoding as it's invalid
+						cache_item->mime = mime_type; // trim encoding as it's invalid
 					} else {
 						cache_item->mime_encoding = encoding;
 						cache_item->is_binary = false;
 						if (strcmp(encoding, "utf-8") == 0) cache_item->is_utf8 = true;
-						else if (strcmp(encoding, "us-ascii") == 0) cache_item->is_utf8 = true;
+						else if (strcmp(encoding, "us-ascii") == 0)
+							cache_item->is_utf8 = true;
 					}
 				}
 			}

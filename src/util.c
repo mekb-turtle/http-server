@@ -66,7 +66,8 @@ char *WARN_UNUSED concat_expand_char(char **base, char add) {
 char *WARN_UNUSED concat_expand_escape_func_n(
         char **base, const char *add, size_t input_len,
         line_func pre_line, void *pre_line_arg,
-        line_func post_line, void *post_line_arg) {
+        line_func post_line, void *post_line_arg,
+        bool append_br) {
 	size_t bulk_i = 0;
 	char hex[16];
 	bool new_line = true;
@@ -100,7 +101,7 @@ char *WARN_UNUSED concat_expand_escape_func_n(
 				else if ((add[i] == '\r' &&                           // carriage return,
 				          (i + 1 >= input_len || add[i + 1] != '\n')) // but not followed by line feed
 				         || add[i] == '\n') {                         // or a line feed
-					escaped = "<br/>";
+					if (append_br) escaped = "<br/>";
 					new_line = true;
 				}
 			}
@@ -125,19 +126,21 @@ char *WARN_UNUSED concat_expand_escape_func_n(
 char *WARN_UNUSED concat_expand_escape_func(
         char **base, const char *add,
         line_func pre_line, void *pre_line_arg,
-        line_func post_line, void *post_line_arg) {
-	return concat_expand_escape_func_n(base, add, strlen(add), pre_line, pre_line_arg, post_line, post_line_arg);
+        line_func post_line, void *post_line_arg,
+        bool append_br) {
+	return concat_expand_escape_func_n(base, add, strlen(add), pre_line, pre_line_arg, post_line, post_line_arg, append_br);
 }
 
 char *WARN_UNUSED concat_expand_escape_func_char(
         char **base, char add,
         line_func pre_line, void *pre_line_arg,
-        line_func post_line, void *post_line_arg) {
-	return concat_expand_escape_func_n(base, &add, 1, pre_line, pre_line_arg, post_line, post_line_arg);
+        line_func post_line, void *post_line_arg,
+        bool append_br) {
+	return concat_expand_escape_func_n(base, &add, 1, pre_line, pre_line_arg, post_line, post_line_arg, append_br);
 }
 
 char *WARN_UNUSED concat_expand_escape_n(char **base, const char *add, size_t input_len) {
-	return concat_expand_escape_func_n(base, add, input_len, NULL, NULL, NULL, NULL);
+	return concat_expand_escape_func_n(base, add, input_len, NULL, NULL, NULL, NULL, true);
 }
 
 char *WARN_UNUSED concat_expand_escape(char **base, const char *add) {

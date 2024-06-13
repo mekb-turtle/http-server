@@ -214,53 +214,76 @@ extern size_t binary_site_css_len;
 
 // TODO: use a template engine for this
 
-bool WARN_UNUSED construct_html_head(char **base) {
-	if (!concat_expand(base, "<html>\n<head>"
-	                         "<meta charset=\"utf-8\">"
-	                         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">")) return false;
-	if (!concat_expand(base, "<style>")) return false;
+bool has_parent_url(server_config cls, struct input_data *input) {
+	return !input->is_root_url && cls->list_directories;
+}
+
+#define append(str) \
+	if (!concat_expand(base, str)) return false
+#define append_escape(str) \
+	if (!concat_expand_escape(base, str)) return false
+#define append_char(str) \
+	if (!concat_expand_char(base, str)) return false
+bool WARN_UNUSED construct_html_head(server_config cls, struct input_data *input, struct output_data *output) {
+	char **base = &output->text;
+	append("<!DOCTYPE html><html>\n<head>"
+	       "<meta charset=\"utf-8\">"
+	       "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
+	append("<style>");
 	if (!concat_expand_n(base, binary_site_css, binary_site_css_len)) return false;
-	if (!concat_expand(base, "</style>")) return false;
+	append("</style>");
 	return true;
 }
 
-bool WARN_UNUSED construct_html_body(char **base, char *title_class) {
-	if (!concat_expand(base, "</head>\n<body><h1 class=\"main-title")) return false;
-	if (title_class && title_class[0] != '\0') {
-		if (!concat_expand_char(base, ' ')) return false;
-		if (!concat_expand_escape(base, title_class)) return false;
+bool WARN_UNUSED construct_html_body(server_config cls, struct input_data *input, struct output_data *output, char *heading_class, char *parent_url_title) {
+	char **base = &output->text;
+	append("</head>\n<body><header><h1 class=\"main-title");
+	if (heading_class && heading_class[0] != '\0') {
+		append_char(' ');
+		append_escape(heading_class);
 	}
-	if (!concat_expand(base, "\">")) return false;
+	append("\">");
+	if (has_parent_url(cls, input)) {
+		append("<span class=\"back\"><a class=\"back\" title=\"");
+		append_escape(parent_url_title);
+		append("\" href=\"");
+		append_escape(input->url_parent);
+		append("\"></a></span>");
+	}
 	return true;
 }
 
-bool WARN_UNUSED construct_html_main(char **base) {
-	return concat_expand(base, "</h1><hr/><div class=\"main\">\n");
+bool WARN_UNUSED construct_html_main(server_config cls, struct input_data *input, struct output_data *output) {
+	char **base = &output->text;
+	append("</h1></header><div class=\"main\">\n");
+	return true;
 }
 
-bool WARN_UNUSED construct_html_end(char **base, server_config cls) {
-	if (!concat_expand(base, "\n</div><hr/>")) return false;
+bool WARN_UNUSED construct_html_end(server_config cls, struct input_data *input, struct output_data *output) {
+	char **base = &output->text;
+	append("\n</div>");
 	if (cls->show_footer) {
-		if (!concat_expand(base, "<footer><p>Running <a href=\"")) return false;
-		if (!concat_expand_escape(base, URL)) return false;
-		if (!concat_expand(base, "\">")) return false;
-		if (!concat_expand_escape(base, TARGET)) return false;
-		if (!concat_expand(base, "</a> ")) return false;
-		if (!concat_expand_escape(base, VERSION)) return false;
-		if (!concat_expand(base, "</p></footer>")) return false;
+		append("<footer><p>Running <a href=\"");
+		append_escape(URL);
+		append("\">");
+		append_escape(TARGET);
+		append("</a> ");
+		append_escape(VERSION);
+		append("</p></footer>");
 	}
-	if (!concat_expand(base, "</body></html>")) return false;
+	append("</body></html>");
 	return true;
 }
 
-bool WARN_UNUSED append_footer(server_config cls, struct output_data *output) {
+bool WARN_UNUSED append_text_footer(server_config cls, struct output_data *output) {
+	char **base = &output->text;
 	switch (output->response_type) {
 		case OUT_TEXT:
-			if (!concat_expand(&output->text, "\nRunning ")) return false;
-			if (!concat_expand_escape(&output->text, TARGET)) return false;
-			if (!concat_expand(&output->text, " ")) return false;
-			if (!concat_expand_escape(&output->text, VERSION)) return false;
-			if (!concat_expand(&output->text, "\n")) return false;
+			append("\nRunning ");
+			append_escape(TARGET);
+			append(" ");
+			append_escape(VERSION);
+			append("\n");
 			break;
 		default:
 			break;

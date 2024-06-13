@@ -29,7 +29,7 @@ static struct option options_getopt[] = {
         {"directory", no_argument,       0, 'd'},
         {"notfound",  required_argument, 0, 'n'},
         {"404",       required_argument, 0, 'n'},
-        {"no-footer",   no_argument,       0, 'F'},
+        {"no-footer", no_argument,       0, 'F'},
         {0,           0,                 0, 0  }
 };
 

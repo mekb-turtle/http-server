@@ -19,15 +19,18 @@ typedef bool (*line_func)(void *, char **base, bool);
 extern char *WARN_UNUSED concat_expand_escape_func_n(
         char **base, const char *add, size_t input_len,
         line_func pre_line, void *pre_line_arg,
-        line_func post_line, void *post_line_arg);
+        line_func post_line, void *post_line_arg,
+        bool append_br);
 extern char *WARN_UNUSED concat_expand_escape_func(
         char **base, const char *add,
         line_func pre_line, void *pre_line_arg,
-        line_func post_line, void *post_line_arg);
+        line_func post_line, void *post_line_arg,
+        bool append_br);
 extern char *WARN_UNUSED concat_expand_escape_func_char(
         char **base, char add,
         line_func pre_line, void *pre_line_arg,
-        line_func post_line, void *post_line_arg);
+        line_func post_line, void *post_line_arg,
+        bool append_br);
 
 extern char *WARN_UNUSED concat_expand_escape_n(char **base, const char *add, size_t input_len);
 extern char *WARN_UNUSED concat_expand_escape(char **base, const char *add);

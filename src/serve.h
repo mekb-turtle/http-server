@@ -51,13 +51,6 @@ extern bool open_file(
 extern size_t get_file_size(struct file_detail file);
 extern bool cjson_add_file_details(cJSON *obj, struct file_detail st, char *url, char *name);
 
-extern bool WARN_UNUSED construct_html_head(char **base);
-extern bool WARN_UNUSED construct_html_body(char **base, char *title_class);
-extern bool WARN_UNUSED construct_html_main(char **base);
-extern bool WARN_UNUSED construct_html_end(char **base, server_config cls);
-#define TITLE_START "<title>"
-#define TITLE_END "</title>"
-
 struct output_data {
 	union {
 		void *data;
@@ -92,6 +85,15 @@ enum serve_result {
 	serve_ok
 };
 
-extern bool WARN_UNUSED append_footer(server_config cls, struct output_data *output);
+extern bool has_parent_url(server_config cls, struct input_data *input);
+
+extern bool WARN_UNUSED construct_html_head(server_config cls, struct input_data *input, struct output_data *output);
+extern bool WARN_UNUSED construct_html_body(server_config cls, struct input_data *input, struct output_data *output, char *heading_class, char *parent_url_title);
+extern bool WARN_UNUSED construct_html_main(server_config cls, struct input_data *input, struct output_data *output);
+extern bool WARN_UNUSED construct_html_end(server_config cls, struct input_data *input, struct output_data *output);
+#define TITLE_START "<title>"
+#define TITLE_END "</title>"
+
+extern bool WARN_UNUSED append_text_footer(server_config cls, struct output_data *output);
 
 #endif
