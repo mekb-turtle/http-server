@@ -2,7 +2,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include "attribute.h"
+#include "macro.h"
 #include "hashmap.h"
 #include "magic.h"
 

@@ -12,7 +12,7 @@
 #include "util.h"
 #include "format_bytes.h"
 #include "status_code.h"
-#include "attribute.h"
+#include "macro.h"
 
 #include "serve_file.h"
 #include "serve_directory.h"
@@ -50,18 +50,18 @@ static bool get_is_download(struct MHD_Connection *connection) {
 }
 
 static struct response_type get_response_type(struct MHD_Connection *connection) {
-#define response(type_, explicit_) ((struct response_type){.type = type_, .explicit = explicit_})
+#define RESPONSE(type_, explicit_) ((struct response_type){.type = type_, .explicit = explicit_})
 	// get ?output query parameter
 	const char *query = MHD_lookup_connection_value(connection, MHD_GET_ARGUMENT_KIND, "output");
 	if (query) {
 		if (strcmp(query, "none") == 0 || strcmp(query, "raw") == 0)
-			return response(OUT_NONE, true);
+			return RESPONSE(OUT_NONE, true);
 		else if (strcmp(query, "text") == 0)
-			return response(OUT_TEXT, true);
+			return RESPONSE(OUT_TEXT, true);
 		else if (strcmp(query, "html") == 0)
-			return response(OUT_HTML, true);
+			return RESPONSE(OUT_HTML, true);
 		else if (strcmp(query, "json") == 0)
-			return response(OUT_JSON, true);
+			return RESPONSE(OUT_JSON, true);
 	}
 	// get Accept header
 	const char *accept_type = MHD_lookup_connection_value(connection, MHD_HEADER_KIND, MHD_HTTP_HEADER_ACCEPT);
@@ -77,15 +77,15 @@ static struct response_type get_response_type(struct MHD_Connection *connection)
 			semi[0] = ',';  // trim off the semicolon and replace it with the comma
 			semi[1] = '\0'; // and null terminate
 
-			if (strstr(str, "text/html")) return response(OUT_HTML, false);
+			if (strstr(str, "text/html")) return RESPONSE(OUT_HTML, false);
 			else if (strstr(str, "application/json"))
-				return response(OUT_JSON, false);
+				return RESPONSE(OUT_JSON, false);
 			else if (strstr(str, "text/plain"))
-				return response(OUT_TEXT, false);
+				return RESPONSE(OUT_TEXT, false);
 		}
 	}
-	return response(OUT_NONE, false);
-#undef response
+	return RESPONSE(OUT_NONE, false);
+#undef RESPONSE
 }
 
 void close_file(struct file_detail *file_detail) {
@@ -195,20 +195,27 @@ size_t get_file_size(struct file_detail file) {
 
 bool cjson_add_file_details(cJSON *obj, struct file_detail st, char *url, char *name) {
 	if (st.dir) {
-		cJSON_AddStringToObject(obj, "type", "directory");
+		ASSERT(cJSON_AddStringToObject(obj, "type", "directory"));
 	} else if (st.fp) {
-		cJSON_AddStringToObject(obj, "type", "file");
-		cJSON_AddNumberToObject(obj, "size", get_file_size(st));
+		ASSERT(cJSON_AddStringToObject(obj, "type", "file"));
+		ASSERT(cJSON_AddNumberToObject(obj, "size", get_file_size(st)));
 		if (st.cache) {
-			cJSON_AddStringToObject(obj, "mime", st.cache->mime_type);
-			cJSON_AddBoolToObject(obj, "binary", st.cache->is_binary);
-		} else {
+			cJSON *mime = cJSON_CreateObject();
+			ASSERT(mime);
+			ASSERT(cJSON_AddStringToObject(mime, "type", st.cache->mime_type));
+			ASSERT(cJSON_AddStringToObject(mime, "encoding", st.cache->mime_encoding));
+			ASSERT(cJSON_AddStringToObject(mime, "full", st.cache->mime));
+			ASSERT(cJSON_AddBoolToObject(mime, "utf8", st.cache->is_utf8));
+			ASSERT(cJSON_AddItemToObject(obj, "mime", mime));
+			ASSERT(cJSON_AddBoolToObject(obj, "binary", st.cache->is_binary));
 		}
 	} else
 		return false;
-	if (url) cJSON_AddStringToObject(obj, "url", url);
-	if (name) cJSON_AddStringToObject(obj, "name", name);
+	if (url) ASSERT(cJSON_AddStringToObject(obj, "url", url));
+	if (name) ASSERT(cJSON_AddStringToObject(obj, "name", name));
 	return true;
+error:
+	return false;
 }
 
 extern const char binary_site_css[];
@@ -220,21 +227,17 @@ bool has_parent_url(server_config cls, struct input_data *input) {
 	return !input->is_root_url && cls->list_directories && input->is_found;
 }
 
-#define append(str) \
-	if (!concat_expand(base, str)) return false
-#define append_escape(str) \
-	if (!concat_expand_escape(base, str)) return false
-#define append_char(str) \
-	if (!concat_expand_char(base, str)) return false
 bool WARN_UNUSED construct_html_head(server_config cls, struct input_data *input, struct output_data *output) {
 	char **base = &output->text;
 	append("<!DOCTYPE html><html>\n<head>"
 	       "<meta charset=\"utf-8\">"
 	       "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
 	append("<style>");
-	if (!concat_expand_n(base, binary_site_css, binary_site_css_len)) return false;
+	append_n(binary_site_css, binary_site_css_len);
 	append("</style>");
 	return true;
+error:
+	return false;
 }
 
 bool WARN_UNUSED construct_html_body(server_config cls, struct input_data *input, struct output_data *output, char *heading_class, char *parent_url_title) {
@@ -253,12 +256,16 @@ bool WARN_UNUSED construct_html_body(server_config cls, struct input_data *input
 		append("\"></a></span>");
 	}
 	return true;
+error:
+	return false;
 }
 
 bool WARN_UNUSED construct_html_main(server_config cls, struct input_data *input, struct output_data *output) {
 	char **base = &output->text;
 	append("</h1></header><div class=\"main\">\n");
 	return true;
+error:
+	return false;
 }
 
 bool WARN_UNUSED construct_html_end(server_config cls, struct input_data *input, struct output_data *output) {
@@ -275,6 +282,8 @@ bool WARN_UNUSED construct_html_end(server_config cls, struct input_data *input,
 	}
 	append("</body></html>");
 	return true;
+error:
+	return false;
 }
 
 bool WARN_UNUSED append_text_footer(server_config cls, struct output_data *output) {
@@ -287,18 +296,21 @@ bool WARN_UNUSED append_text_footer(server_config cls, struct output_data *outpu
 			append_escape(VERSION);
 			append("\n");
 			break;
-		case OUT_JSON:
+		case OUT_JSON:;
 			// add footer object to JSON
 			cJSON *running = cJSON_CreateObject();
-			cJSON_AddStringToObject(running, "name", TARGET);
-			cJSON_AddStringToObject(running, "version", VERSION);
-			cJSON_AddStringToObject(running, "url", URL);
-			cJSON_AddItemToObject(output->json_root, "running", running);
+			ASSERT(running);
+			ASSERT(cJSON_AddStringToObject(running, "name", TARGET));
+			ASSERT(cJSON_AddStringToObject(running, "version", VERSION));
+			ASSERT(cJSON_AddStringToObject(running, "url", URL));
+			ASSERT(cJSON_AddItemToObject(output->json_root, "running", running));
 			break;
 		default:
 			break;
 	}
 	return true;
+error:
+	return false;
 }
 
 static void ensure_path_slash(char *path, char slash) {
@@ -321,6 +333,8 @@ enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connecti
 	        .json_root = cJSON_CreateObject(),              // for responding with JSON data
 	        .response_type = get_response_type(connection), // response content type enum
 	};
+
+	if (!output.json_root) goto server_error;
 
 	struct input_data input = {
 	        .file = {.fp = NULL, .dir = NULL, .cache = NULL}, // file details
@@ -395,7 +409,7 @@ enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connecti
 	ensure_path_slash(input.filepath, PATH_SEPARATOR);
 	ensure_path_slash(input.filepath_parent, PATH_SEPARATOR);
 
-serve_logic:;
+serve_path:;
 	enum serve_result result = not_found;
 	if (input.file.fp) {
 		result = serve_file(cls, &input, &output);
@@ -408,7 +422,6 @@ serve_logic:;
 			goto not_found;
 		case serve_ok:
 			goto respond;
-		case serve_error:
 		default:
 			goto server_error;
 	}
@@ -427,7 +440,7 @@ not_found:
 		if (!open_file(cls->not_found_file, &input.file, cls, true)) goto not_found;
 
 		// TODO: make it always return raw data as the not found page
-		goto serve_logic;
+		goto serve_path;
 	}
 	goto respond;
 server_error:

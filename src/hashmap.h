@@ -1,7 +1,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "attribute.h"
+#include "macro.h"
 
 struct hashmap_entry {
 	void *key;

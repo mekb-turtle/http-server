@@ -2,7 +2,7 @@
 #define UTIL_H
 #include <stddef.h>
 #include <stdbool.h>
-#include "attribute.h"
+#include "macro.h"
 extern char *strchrnul_(const char *s, int c);
 
 // TODO: this is a mess, clean it up

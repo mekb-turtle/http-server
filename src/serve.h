@@ -10,7 +10,7 @@
 #include <microhttpd.h>
 #include <cjson/cJSON.h>
 
-#include "attribute.h"
+#include "macro.h"
 
 typedef const struct server_config {
 	char *base_file;

@@ -12,7 +12,7 @@
 #include "serve.h"
 #include "file_cache.h"
 #include "magic.h"
-#include "attribute.h"
+#include "macro.h"
 
 static struct MHD_Daemon *httpd;
 static void signal_handler(int sig); // later in the code

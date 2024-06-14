@@ -4,12 +4,10 @@
 
 #include "util.h"
 #include "status_code.h"
+#include "macro.h"
 
-#define append(str) \
-	if (!concat_expand(&output->text, str)) goto server_error
-#define append_escape(str) \
-	if (!concat_expand_escape(&output->text, str)) goto server_error
 enum serve_result serve_result(server_config cls, struct input_data *input, struct output_data *output) {
+	char **base = &output->text;
 	if (!output->data) { // if there is no data to respond with
 		output->size = 0;
 
@@ -36,16 +34,16 @@ enum serve_result serve_result(server_config cls, struct input_data *input, stru
 					append("\n");
 					break;
 				case OUT_HTML:
-					if (!construct_html_head(cls, input, output)) goto server_error;
+					ASSERT(construct_html_head(cls, input, output));
 					append(TITLE_START);
 					append_escape("Index of ");
 					append_escape(input->url);
 					append(TITLE_END);
-					if (!construct_html_body(cls, input, output, is_error ? "error" : "ok", "Back")) goto server_error;
+					ASSERT(construct_html_body(cls, input, output, is_error ? "error" : "ok", "Back"));
 					append_escape(status_num_str);
 					append_escape(" - ");
 					append_escape(status_name);
-					if (!construct_html_main(cls, input, output)) goto server_error;
+					ASSERT(construct_html_main(cls, input, output));
 					append("<p>");
 					if (has_parent_url(cls, input)) {
 						append("<a href=\"");
@@ -53,24 +51,25 @@ enum serve_result serve_result(server_config cls, struct input_data *input, stru
 						append("\">Back</a> - ");
 					}
 					append("<a class=\"main-page\" href=\"/\">Main Page</a></p>\n");
-					if (!construct_html_end(cls, input, output)) goto server_error;
+					ASSERT(construct_html_end(cls, input, output));
 					break;
 				case OUT_JSON:;
 					// set status code in JSON
 					cJSON *status_obj = cJSON_CreateObject();
-					cJSON_AddNumberToObject(status_obj, "number", output->status);
-					cJSON_AddStringToObject(status_obj, "message", status_name);
-					cJSON_AddBoolToObject(status_obj, "ok", !is_error);
-					cJSON_AddItemToObject(output->json_root, "status", status_obj);
+					ASSERT(status_obj);
+					ASSERT(cJSON_AddNumberToObject(status_obj, "number", output->status));
+					ASSERT(cJSON_AddStringToObject(status_obj, "message", status_name));
+					ASSERT(cJSON_AddBoolToObject(status_obj, "ok", !is_error));
+					ASSERT(cJSON_AddItemToObject(output->json_root, "status", status_obj));
 					break;
 			}
 
-			if (!append_text_footer(cls, output)) goto server_error;
+			ASSERT(append_text_footer(cls, output));
 
 			if (output->response_type.type == OUT_JSON) {
 				// encode JSON data and respond with it
 				output->data = cJSON_Print(output->json_root);
-				if (!output->data) goto server_error;
+				ASSERT(output->data);
 				append("\n");
 			}
 
@@ -79,7 +78,7 @@ enum serve_result serve_result(server_config cls, struct input_data *input, stru
 	}
 	return serve_ok;
 
-server_error:
+error:
 	if (output->data) free(output->data); // free the data if it was allocated
 	output->size = 0;
 	output->content_type = NULL;

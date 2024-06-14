@@ -4,12 +4,9 @@
 
 #include "util.h"
 #include "format_bytes.h"
+#include "macro.h"
 
-#define append(str) \
-	if (!concat_expand(data, str)) goto error
-#define append_escape(str) \
-	if (!concat_expand_escape(data, str)) goto error
-static bool add_dir_item(struct response_type response_type, char **data, struct file_detail file, char *url, char *name, cJSON *dir_array, char *class, char *custom_type) {
+static bool add_dir_item(struct response_type response_type, char **base, struct file_detail file, char *url, char *name, cJSON *dir_array, char *class, char *custom_type) {
 	if (!custom_type) {
 		if (file.dir)
 			custom_type = "directory";
@@ -64,8 +61,9 @@ static bool add_dir_item(struct response_type response_type, char **data, struct
 			break;
 		case OUT_JSON:;
 			cJSON *obj = cJSON_CreateObject();
-			cjson_add_file_details(obj, file, url, name);
-			cJSON_AddItemToArray(dir_array, obj);
+			ASSERT(obj);
+			ASSERT(cjson_add_file_details(obj, file, url, name));
+			ASSERT(cJSON_AddItemToArray(dir_array, obj));
 			break;
 	}
 
@@ -75,17 +73,12 @@ error:
 	free(size_format);
 	return false;
 }
-#undef append
-#undef append_escape
 
-#define append(str) \
-	if (!concat_expand(&output->text, str)) goto server_error
-#define append_escape(str) \
-	if (!concat_expand_escape(&output->text, str)) goto server_error
 enum serve_result serve_directory(server_config cls, struct input_data *input, struct output_data *output) {
 	if (!input->file.dir) return serve_not_found;
 	if (!cls->list_directories) return serve_not_found; // directory listing not allowed
 	cJSON *dir_array = NULL;                            // array of directory children
+	char **base = &output->text;
 	switch (output->response_type.type) {
 		case OUT_NONE:
 		case OUT_TEXT:
@@ -95,21 +88,22 @@ enum serve_result serve_directory(server_config cls, struct input_data *input, s
 			append("\n\n");
 			break;
 		case OUT_HTML:
-			if (!construct_html_head(cls, input, output)) goto server_error;
+			ASSERT(construct_html_head(cls, input, output));
 			append(TITLE_START);
 			append_escape("Index of ");
 			append_escape(input->url);
 			append(TITLE_END);
-			if (!construct_html_body(cls, input, output, NULL, "Parent Directory")) goto server_error;
+			ASSERT(construct_html_body(cls, input, output, NULL, "Parent Directory"));
 			append_escape("Index of ");
 			append_escape(input->url);
-			if (!construct_html_main(cls, input, output)) goto server_error;
+			ASSERT(construct_html_main(cls, input, output));
 			append("<ul>\n");
 			break;
 		case OUT_JSON:
 			dir_array = cJSON_CreateArray();
-			cJSON_AddItemToObject(output->json_root, "children", dir_array);
-			cjson_add_file_details(output->json_root, input->file, input->url, NULL);
+			ASSERT(dir_array);
+			ASSERT(cJSON_AddItemToObject(output->json_root, "children", dir_array));
+			ASSERT(cjson_add_file_details(output->json_root, input->file, input->url, NULL));
 			break;
 	}
 
@@ -120,7 +114,7 @@ enum serve_result serve_directory(server_config cls, struct input_data *input, s
 		if (open_file(input->filepath_parent, &parent_file, cls, true)) {
 			res = add_dir_item(output->response_type, &output->text, parent_file, input->url_parent, "..", dir_array, "parent", "parent directory");
 			close_file(&parent_file);
-			if (!res) goto server_error;
+			ASSERT(res);
 		}
 	}
 
@@ -148,15 +142,15 @@ enum serve_result serve_directory(server_config cls, struct input_data *input, s
 
 		close_file(&child_file);
 
-		if (!res) goto server_error;
+			ASSERT(res);
 	}
 
 	if (output->response_type.type == OUT_HTML) {
 		append("</ul>");
-		if (!construct_html_end(cls, input, output)) goto server_error;
+		ASSERT(construct_html_end(cls, input, output));
 	}
 
-	if (!append_text_footer(cls, output)) goto server_error;
+	ASSERT(append_text_footer(cls, output));
 
 	if (output->response_type.type != OUT_JSON) {
 		output->data_memory = MHD_RESPMEM_MUST_FREE;
@@ -164,7 +158,7 @@ enum serve_result serve_directory(server_config cls, struct input_data *input, s
 	}
 	return serve_ok;
 
-server_error:
+error:
 	if (output->data) free(output->data); // free the data if it was allocated
 	return serve_error;
 }

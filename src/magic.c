@@ -1,7 +1,7 @@
 #include "magic.h"
 #include <stddef.h>
 #include <stdio.h>
-#include "attribute.h"
+#include "macro.h"
 
 magic_t magic_cookie = NULL;
 

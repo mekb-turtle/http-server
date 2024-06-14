@@ -36,6 +36,9 @@ The server supports directory listing and file preview.
 
 - [x] Read files from disk to serve
   - [x] File caching
+    - [ ] Cache invalidation
+    - [x] MIME type detection
+    - [ ] Large file support (don't cache?)
 - [x] Directory listing
 - [ ] File preview
   - [x] Text
