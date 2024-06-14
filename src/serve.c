@@ -287,6 +287,14 @@ bool WARN_UNUSED append_text_footer(server_config cls, struct output_data *outpu
 			append_escape(VERSION);
 			append("\n");
 			break;
+		case OUT_JSON:
+			// add footer object to JSON
+			cJSON *running = cJSON_CreateObject();
+			cJSON_AddStringToObject(running, "name", TARGET);
+			cJSON_AddStringToObject(running, "version", VERSION);
+			cJSON_AddStringToObject(running, "url", URL);
+			cJSON_AddItemToObject(output->json_root, "running", running);
+			break;
 		default:
 			break;
 	}

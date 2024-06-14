@@ -62,15 +62,17 @@ enum serve_result serve_result(server_config cls, struct input_data *input, stru
 					cJSON_AddStringToObject(status_obj, "message", status_name);
 					cJSON_AddBoolToObject(status_obj, "ok", !is_error);
 					cJSON_AddItemToObject(output->json_root, "status", status_obj);
-
-					// encode JSON data and respond with it
-					output->data = cJSON_Print(output->json_root);
-					if (!output->data) goto server_error;
-					append("\n");
 					break;
 			}
 
 			if (!append_text_footer(cls, output)) goto server_error;
+
+			if (output->response_type.type == OUT_JSON) {
+				// encode JSON data and respond with it
+				output->data = cJSON_Print(output->json_root);
+				if (!output->data) goto server_error;
+				append("\n");
+			}
 
 			if (output->data) output->size = strlen(output->data);
 		}
