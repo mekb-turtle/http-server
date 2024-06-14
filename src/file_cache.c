@@ -27,7 +27,9 @@ static size_t fnv_1a_hash(void *data) {
 static void free_value(void *value_) {
 	struct file_cache_item *value = (struct file_cache_item *) value_;
 	if (value->data) free(value->data);
-	if (value->mime_type) free(value->mime_type); // mime_type is strdup'd
+	if (value->mime) free(value->mime);
+	if (value->mime_type) free(value->mime_type);
+	if (value->mime_encoding) free(value->mime_encoding);
 	free(value);
 }
 
@@ -167,10 +169,9 @@ static bool detect_mime(struct file_cache_item *file, struct file_cache_item *en
 	if (strcmp(encoding, "binary") == 0) {
 		entry->is_binary = true;
 		entry->is_utf8 = false;
-		encoding = "";
+		entry->mime_encoding = NULL;
 	} else {
 		ASSERT(entry->mime_encoding = strdup(encoding)); // create another copy
-		encoding = entry->mime_encoding;
 		entry->is_binary = false;
 		// check if the encoding is UTF-8 or US-ASCII
 		if (strcmp(entry->mime_encoding, "utf-8") == 0)
@@ -180,10 +181,15 @@ static bool detect_mime(struct file_cache_item *file, struct file_cache_item *en
 	}
 
 	// reconstruct the MIME type with the encoding
-	size_t len = strlen(entry->mime_type) + strlen(entry->mime_encoding) + 32;
-	entry->mime = malloc(len);
-	ASSERT(entry->mime);
-	ASSERTL(snprintf(entry->mime, len, "%s; charset=%s", entry->mime_type, entry->mime_encoding) >= 0, mime);
+	if (entry->mime_encoding) {
+		size_t len = strlen(entry->mime_type) + strlen(entry->mime_encoding) + 32;
+		entry->mime = malloc(len);
+		ASSERT(entry->mime);
+		ASSERTL(snprintf(entry->mime, len, "%s; charset=%s", entry->mime_type, entry->mime_encoding) >= 0, mime);
+	} else {
+		entry->mime = strdup(entry->mime_type);
+		ASSERT(entry->mime);
+	}
 	return true;
 error:
 	eprintf(ALLOC_ERROR);
