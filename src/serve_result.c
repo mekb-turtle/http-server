@@ -26,10 +26,10 @@ enum serve_result serve_result(server_config cls, struct input_data *input, stru
 			output->data_memory = MHD_RESPMEM_MUST_FREE; // free the data after responding
 
 			// write out status code
-			switch (output->response_type) {
+			switch (output->response_type.type) {
 				case OUT_NONE:
 				case OUT_TEXT:
-					output->response_type = OUT_TEXT;
+					output->response_type.type = OUT_TEXT;
 					append(status_num_str);
 					append(" - ");
 					append(status_name);
@@ -81,6 +81,7 @@ server_error:
 	if (output->data) free(output->data); // free the data if it was allocated
 	output->size = 0;
 	output->content_type = NULL;
-	output->response_type = OUT_NONE;
+	output->response_type.type = OUT_NONE;
+	output->response_type.explicit = true;
 	return serve_not_found;
 }

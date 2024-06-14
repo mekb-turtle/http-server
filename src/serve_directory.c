@@ -9,7 +9,7 @@
 	if (!concat_expand(data, str)) goto error
 #define append_escape(str) \
 	if (!concat_expand_escape(data, str)) goto error
-static bool add_dir_item(enum response_type response_type, char **data, struct file_detail file, char *url, char *name, cJSON *dir_array, char *class, char *custom_type) {
+static bool add_dir_item(struct response_type response_type, char **data, struct file_detail file, char *url, char *name, cJSON *dir_array, char *class, char *custom_type) {
 	if (!custom_type) {
 		if (file.dir)
 			custom_type = "directory";
@@ -24,7 +24,7 @@ static bool add_dir_item(enum response_type response_type, char **data, struct f
 	snprintf(size_str, 32, "%li", size);
 	char *size_format = format_bytes(size, binary_i);
 
-	switch (response_type) {
+	switch (response_type.type) {
 		case OUT_NONE:
 		case OUT_TEXT:
 			append("- ");
@@ -86,10 +86,10 @@ enum serve_result serve_directory(server_config cls, struct input_data *input, s
 	if (!input->file.dir) return serve_not_found;
 	if (!cls->list_directories) return serve_not_found; // directory listing not allowed
 	cJSON *dir_array = NULL;                            // array of directory children
-	switch (output->response_type) {
+	switch (output->response_type.type) {
 		case OUT_NONE:
 		case OUT_TEXT:
-			output->response_type = OUT_TEXT;
+			output->response_type.type = OUT_TEXT;
 			append("Index of ");
 			append(input->url);
 			append("\n\n");
@@ -151,14 +151,14 @@ enum serve_result serve_directory(server_config cls, struct input_data *input, s
 		if (!res) goto server_error;
 	}
 
-	if (output->response_type == OUT_HTML) {
+	if (output->response_type.type == OUT_HTML) {
 		append("</ul>");
 		if (!construct_html_end(cls, input, output)) goto server_error;
 	}
 
 	if (!append_text_footer(cls, output)) goto server_error;
 
-	if (output->response_type != OUT_JSON) {
+	if (output->response_type.type != OUT_JSON) {
 		output->data_memory = MHD_RESPMEM_MUST_FREE;
 		output->size = strlen(output->text);
 	}

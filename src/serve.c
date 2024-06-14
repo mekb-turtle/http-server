@@ -49,18 +49,19 @@ static bool get_is_download(struct MHD_Connection *connection) {
 	return false;
 }
 
-static enum response_type get_response_type(struct MHD_Connection *connection) {
+static struct response_type get_response_type(struct MHD_Connection *connection) {
+#define response(type_, explicit_) ((struct response_type){.type = type_, .explicit = explicit_})
 	// get ?output query parameter
-	const char *output = MHD_lookup_connection_value(connection, MHD_GET_ARGUMENT_KIND, "output");
-	if (output) {
-		if (strcmp(output, "none") == 0 || strcmp(output, "raw") == 0)
-			return OUT_NONE;
-		else if (strcmp(output, "text") == 0)
-			return OUT_TEXT;
-		else if (strcmp(output, "html") == 0)
-			return OUT_HTML;
-		else if (strcmp(output, "json") == 0)
-			return OUT_JSON;
+	const char *query = MHD_lookup_connection_value(connection, MHD_GET_ARGUMENT_KIND, "output");
+	if (query) {
+		if (strcmp(query, "none") == 0 || strcmp(query, "raw") == 0)
+			return response(OUT_NONE, true);
+		else if (strcmp(query, "text") == 0)
+			return response(OUT_TEXT, true);
+		else if (strcmp(query, "html") == 0)
+			return response(OUT_HTML, true);
+		else if (strcmp(query, "json") == 0)
+			return response(OUT_JSON, true);
 	}
 	// get Accept header
 	const char *accept_type = MHD_lookup_connection_value(connection, MHD_HEADER_KIND, MHD_HTTP_HEADER_ACCEPT);
@@ -76,14 +77,15 @@ static enum response_type get_response_type(struct MHD_Connection *connection) {
 			semi[0] = ',';  // trim off the semicolon and replace it with the comma
 			semi[1] = '\0'; // and null terminate
 
-			if (strstr(str, "text/html")) return OUT_HTML;
+			if (strstr(str, "text/html")) return response(OUT_HTML, false);
 			else if (strstr(str, "application/json"))
-				return OUT_JSON;
+				return response(OUT_JSON, false);
 			else if (strstr(str, "text/plain"))
-				return OUT_TEXT;
+				return response(OUT_TEXT, false);
 		}
 	}
-	return OUT_NONE;
+	return response(OUT_NONE, false);
+#undef response
 }
 
 void close_file(struct file_detail *file_detail) {
@@ -215,7 +217,7 @@ extern size_t binary_site_css_len;
 // TODO: use a template engine for this
 
 bool has_parent_url(server_config cls, struct input_data *input) {
-	return !input->is_root_url && cls->list_directories;
+	return !input->is_root_url && cls->list_directories && input->is_found;
 }
 
 #define append(str) \
@@ -277,7 +279,7 @@ bool WARN_UNUSED construct_html_end(server_config cls, struct input_data *input,
 
 bool WARN_UNUSED append_text_footer(server_config cls, struct output_data *output) {
 	char **base = &output->text;
-	switch (output->response_type) {
+	switch (output->response_type.type) {
 		case OUT_TEXT:
 			append("\nRunning ");
 			append_escape(TARGET);
@@ -315,10 +317,14 @@ enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connecti
 	struct input_data input = {
 	        .file = {.fp = NULL, .dir = NULL, .cache = NULL}, // file details
 	        .is_root_url = true,
-	        .is_download = get_is_download(connection)  // if the file should be downloaded by the browser
+	        .is_download = get_is_download(connection), // if the file should be downloaded by the browser
+	        .is_found = true,
 	};
 
-	if (input.is_download) output.response_type = OUT_NONE; // force raw output for downloads
+	if (input.is_download) {
+		output.response_type.type = OUT_NONE; // force raw output for downloads
+		output.response_type.explicit = true;
+	}
 
 	bool not_found = false; // for custom 404 page
 
@@ -334,7 +340,7 @@ enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connecti
 	if (user_url[0] != '/') goto bad_request;
 
 	// set up input data
-	char url_[PATH_MAX], url_parent_[PATH_MAX], filepath_[PATH_MAX], filepath_parent_[PATH_MAX], log_url[PATH_MAX];
+	char url_[PATH_MAX], url_parent_[PATH_MAX], filepath_[PATH_MAX], filepath_parent_[PATH_MAX];
 	input.url = url_;
 	input.url_parent = url_parent_;
 	input.filepath = filepath_;
@@ -381,8 +387,6 @@ enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connecti
 	ensure_path_slash(input.filepath, PATH_SEPARATOR);
 	ensure_path_slash(input.filepath_parent, PATH_SEPARATOR);
 
-	memcpy(log_url, input.url, PATH_MAX);
-
 serve_logic:;
 	enum serve_result result = not_found;
 	if (input.file.fp) {
@@ -404,13 +408,15 @@ serve_logic:;
 not_found:
 	close_file(&input.file);
 	output.status = MHD_HTTP_NOT_FOUND;
+	input.url_parent = "/";
+	input.is_found = false;
 	if (not_found) { // prevent infinite loop
 		eprintf("Error reading 404 file: %s\n", cls->not_found_file);
 	} else if (cls->not_found_file) {
 		not_found = true;
+
 		// resolve the file
 		if (!open_file(cls->not_found_file, &input.file, cls, true)) goto not_found;
-		input.url_parent = "/";
 
 		// TODO: make it always return raw data as the not found page
 		goto serve_logic;
@@ -435,7 +441,8 @@ respond:;
 			output.status = MHD_HTTP_NOT_FOUND;
 			break;
 		case serve_error:
-			output.response_type = OUT_NONE; // force no content
+			output.response_type.type = OUT_NONE; // force no content
+			output.response_type.explicit = true;
 			output.status = MHD_HTTP_INTERNAL_SERVER_ERROR;
 			break;
 		case serve_ok:
@@ -446,7 +453,7 @@ respond:;
 
 	if (!output.content_type) {
 		// set content type accordingly
-		switch (output.response_type) {
+		switch (output.response_type.type) {
 			case OUT_NONE:
 				break;
 			case OUT_TEXT:
@@ -484,7 +491,7 @@ respond:;
 		char *ip = sockaddr_to_string(addr);
 		char *size_str = format_bytes(output.size, binary_i);
 		char *response_type_str = NULL;
-		switch (output.response_type) {
+		switch (output.response_type.type) {
 			case OUT_NONE:
 				response_type_str = "Raw";
 				break;
@@ -501,12 +508,12 @@ respond:;
 		// log the request and response
 		printf(
 		        "Request: %s%s%s %s\n"
-		        "Response: %i %s, %s%sType: %s, %s%s%s\n",
+		        "Response: %i %s, %s%sType: %s (%c), %s%s%s\n",
 		        ip ? ip : "", ip ? ", " : "",
-		        method, log_url,
+		        method, input.url,
 		        output.status, status_codes[output.status],
 		        output.content_type ? output.content_type : "", output.content_type ? ", " : "",
-		        response_type_str,
+		        response_type_str, output.response_type.explicit ? 'E' : 'I',
 		        input.filepath ? input.filepath : "", input.filepath ? ", " : "",
 		        size_str);
 		// all in one printf call to prevent interleaving of output from multiple threads

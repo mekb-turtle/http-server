@@ -31,10 +31,18 @@ enum serve_result serve_file(server_config cls, struct input_data *input, struct
 	snprintf(size_str, 32, "%li", file_data->size);
 	char *size_format = format_bytes(file_data->size, binary_i);
 
-	switch (output->response_type) {
+	if (!output->response_type.explicit) {
+		if (output->response_type.type == OUT_HTML && strcmp(file_data->mime_type, "text/html") == 0)
+			goto raw; // force raw output for HTML files unless explicitly requested otherwise
+		if (output->response_type.type == OUT_JSON && strcmp(file_data->mime_type, "application/json") == 0)
+			goto raw; // same for JSON
+	}
+
+	switch (output->response_type.type) {
 		case OUT_NONE:
 		case OUT_TEXT:
-			output->response_type = OUT_NONE;
+		raw:
+			output->response_type.type = OUT_NONE;
 			output->data = file_data->data;
 			output->size = file_data->size;
 			output->content_type = file_data->mime;
@@ -104,7 +112,7 @@ enum serve_result serve_file(server_config cls, struct input_data *input, struct
 	}
 	free(size_format);
 	if (!append_text_footer(cls, output)) goto server_error;
-	if (output->response_type == OUT_HTML) output->size = strlen(output->text);
+	if (output->response_type.type == OUT_HTML) output->size = strlen(output->text);
 	return serve_ok;
 server_error:
 	if (output->data && output->data != file_data->data) free(output->data); // free the data if it was allocated

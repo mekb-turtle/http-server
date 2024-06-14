@@ -61,11 +61,14 @@ struct output_data {
 	unsigned int status;
 	const char *content_type; // derived from response_type or set manually from file
 	cJSON *json_root;
-	enum response_type {
-		OUT_NONE,
-		OUT_TEXT,
-		OUT_HTML,
-		OUT_JSON
+	struct response_type {
+		enum {
+			OUT_NONE,
+			OUT_TEXT,
+			OUT_HTML,
+			OUT_JSON
+		} type;
+		bool explicit;
 	} response_type;
 };
 
@@ -77,6 +80,7 @@ struct input_data {
 	char *filepath_parent;
 	bool is_root_url;
 	bool is_download;
+	bool is_found;
 };
 
 enum serve_result {
