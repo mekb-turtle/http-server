@@ -141,7 +141,6 @@ enum cache_result get_file_cached(
 		return cache_fatal_error;
 	}
 
-	// TODO: read file into memory
 	file_detail->cache = entry->value;
 	return cache_miss;
 }
@@ -178,6 +177,11 @@ static bool detect_mime(struct file_cache_item *file, struct file_cache_item *en
 			entry->is_utf8 = true;
 		else if (strcmp(entry->mime_encoding, "us-ascii") == 0)
 			entry->is_utf8 = true;
+	}
+
+	if (strcmp(entry->mime_type, "text/plain") == 0 ||
+	    strcmp(entry->mime_type, "application/octet-stream") == 0) {
+		// TODO: guess MIME type based on file extension
 	}
 
 	// reconstruct the MIME type with the encoding

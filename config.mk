@@ -1,5 +1,5 @@
 TARGET = http-server
-VERSION = 1.1.0
+VERSION = 1.1.1
 URL = https://github.com/mekb-turtle/http-server
 
 EXTRA_SRC_FILES =

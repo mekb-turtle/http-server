@@ -140,7 +140,6 @@ start_stat_file:
 			memcpy(filepath, filepath_, PATH_MAX);
 			goto start_stat_file; // repeat the check for the target
 		case S_IFREG:             // regular file
-			// TODO: caching
 			out->fp = fopen(filepath, "rb");
 			if (!out->fp) {
 				eprintf("Failed to open file: %s: %s\n", filepath, strerror(errno));
@@ -431,15 +430,14 @@ not_found:
 	output.status = MHD_HTTP_NOT_FOUND;
 	input.url_parent = "/";
 	input.is_found = false;
+
 	if (not_found) { // prevent infinite loop
 		eprintf("Error reading 404 file: %s\n", cls->not_found_file);
 	} else if (cls->not_found_file) {
 		not_found = true;
-
-		// resolve the file
+		// resolve the not found file set in the config
 		if (!open_file(cls->not_found_file, &input.file, cls, true)) goto not_found;
-
-		// TODO: make it always return raw data as the not found page
+		// serve that file instead
 		goto serve_path;
 	}
 	goto respond;

@@ -145,7 +145,7 @@ enum serve_result serve_directory(server_config cls, struct input_data *input, s
 
 		close_file(&child_file);
 
-			ASSERT(res);
+		ASSERT(res);
 	}
 
 	if (output->response_type.type == OUT_HTML) {
