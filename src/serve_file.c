@@ -11,6 +11,8 @@ static bool pre_line(void *, char **base, bool end);
 static bool post_line(void *, char **base, bool end);
 
 enum serve_result serve_file(server_config cls, struct input_data *input, struct output_data *output) {
+	char *size_format = NULL;
+
 	if (!input->file.fp) return serve_not_found;
 	enum cache_result result = get_file_cached(&input->file, true);
 	switch (result) {
@@ -27,8 +29,9 @@ enum serve_result serve_file(server_config cls, struct input_data *input, struct
 
 	struct file_cache_item *file_data = input->file.cache;
 	char size_str[32];
-	snprintf(size_str, 32, "%li", file_data->size);
-	char *size_format = format_bytes(file_data->size, binary_i);
+	ASSERT(snprintf(size_str, 32, "%li", file_data->size) >= 0);
+	size_format = format_bytes(file_data->size, binary_i);
+	ASSERT(size_format);
 
 	if (!output->response_type.explicit) {
 		if (output->response_type.type == OUT_HTML && strcmp(file_data->mime_type, "text/html") == 0)

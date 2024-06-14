@@ -51,118 +51,144 @@ bool initialize_cache_map() {
 	return true;
 }
 
+#define ALLOC_ERROR "Failed to allocate memory\n"
+static bool detect_mime(struct file_cache_item *file, struct file_cache_item *entry);
+
 enum cache_result get_file_cached(
-        struct file_detail *file,
+        struct file_detail *file_detail,
         bool fetch_new) {
-	if (!file) return cache_fatal_error;
-	if (!file->filepath) return cache_fatal_error;
-	if (file->cache) goto cache_hit;
+	if (!file_detail) return cache_fatal_error;
+	if (!file_detail->filepath) return cache_fatal_error;
+	if (file_detail->cache) goto cache_hit;
 
 	if (!initialize_cache_map()) return cache_fatal_error;
 	if (!initialize_magic()) return cache_fatal_error;
 
-	struct hashmap_entry *entry = hashmap_get(cache_map, file->filepath);
+	struct hashmap_entry *entry = hashmap_get(cache_map, file_detail->filepath);
 	if (entry) {
 		// TODO: make cache expire after a certain time
-		file->cache = (struct file_cache_item *) entry->value;
+		file_detail->cache = (struct file_cache_item *) entry->value;
 	cache_hit:
 		return cache_hit;
 	}
-	if (!fetch_new) return cache_miss;      // return miss if we don't want to fetch new data
-	if (!file->fp) return cache_not_a_file; // can't read a file if it isn't open
+	if (!fetch_new) return cache_miss;             // return miss if we don't want to fetch new data
+	if (!file_detail->fp) return cache_not_a_file; // can't read a file if it isn't open
 
 	// create a new cache entry
 
 	// copy the filepath to avoid dangling pointers
-	char *filepath = strdup(file->filepath);
+	char *filepath = strdup(file_detail->filepath);
 	if (!filepath) {
-	malloc_error:
-		eprintf("Failed to allocate memory\n");
+		eprintf(ALLOC_ERROR);
 		return cache_fatal_error;
 	}
 
-	struct file_cache_item *cache_item = malloc(sizeof(struct file_cache_item));
-	if (!cache_item) {
+	struct file_cache_item *file = malloc(sizeof(struct file_cache_item));
+	if (!file) {
 		free(filepath);
-		goto malloc_error;
+		eprintf(ALLOC_ERROR);
+		return cache_fatal_error;
 	}
 
-	memset(cache_item, 0, sizeof(struct file_cache_item)); // zero out the struct
+	memset(file, 0, sizeof(struct file_cache_item)); // zero out the struct
 
-	cache_item->size = file->stat.st_size;
-	cache_item->data = malloc(cache_item->size);
-	if (!cache_item->data) {
+	file->mime_type = NULL;
+	file->mime_encoding = NULL;
+	file->mime = NULL;
+	file->is_binary = true; // assume binary unless encoding is specified
+	file->is_utf8 = false;
+
+	file->size = file_detail->stat.st_size;
+	file->data = malloc(file->size);
+	if (!file->data) {
 		free(filepath);
-		free_value(cache_item);
-		goto malloc_error;
+		free_value(file);
+		eprintf(ALLOC_ERROR);
+		return cache_fatal_error;
 	}
 
-	size_t read = fread(cache_item->data, 1, file->stat.st_size, file->fp);
-	if (read != file->stat.st_size || ferror(file->fp)) {
+	size_t read = fread(file->data, 1, file_detail->stat.st_size, file_detail->fp);
+	if (read != file_detail->stat.st_size || ferror(file_detail->fp)) {
 	read_error:
-		eprintf("Error reading file: %s\n", file->filepath);
-		if (read != file->stat.st_size)
-			eprintf("Expected: %zu bytes, Read: %zu bytes\n", file->stat.st_size, read);
+		eprintf("Error reading file: %s\n", file_detail->filepath);
+		if (read != file_detail->stat.st_size)
+			eprintf("Expected: %zu bytes, Read: %zu bytes\n", file_detail->stat.st_size, read);
 		else
 			eprintf("File has more data than expected\n");
 		eprintf("Error: %s, EOF: %s\n",
-		        ferror(file->fp) ? "yes" : "no", feof(file->fp) ? "yes" : "no");
+		        ferror(file_detail->fp) ? "yes" : "no", feof(file_detail->fp) ? "yes" : "no");
 		free(filepath);
-		free_value(cache_item);
+		free_value(file);
 		return cache_fatal_error;
 	}
 
 	// check the file is at EOF
-	if (fgetc(file->fp) != EOF) goto read_error;
+	if (fgetc(file_detail->fp) != EOF) goto read_error;
 
-	// determine the MIME type using libmagic
-	cache_item->mime_type = NULL;
-	cache_item->mime_encoding = NULL;
-	cache_item->mime = magic_buffer(magic_cookie, cache_item->data, cache_item->size);
-	cache_item->is_binary = true; // assume binary unless encoding is specified
-	cache_item->is_utf8 = false;
-
-	if (cache_item->mime) {
-		// find the MIME type
-		char *mime_type = strdup(cache_item->mime);
-		if (!mime_type) {
-			free(filepath);
-			free_value(cache_item);
-			goto malloc_error;
-		}
-		char *semicolon = strchr(mime_type, ';');
-		if (semicolon) *semicolon = '\0'; // trim the semicolon and everything after it
-		cache_item->mime_type = mime_type;
-
-		// parse the MIME type
-		const char *encoding;
-		if ((encoding = strchr(cache_item->mime, ';'))) {
-			if ((encoding = strchr(encoding, '='))) { // magic always returns "x/x; charset=x" for MAGIC_MIME
-				++encoding;
-				if (*encoding != '\0') {
-					if (strcmp(encoding, "binary") == 0) {
-						// "binary" is not a valid encoding for HTTP responses
-						cache_item->mime = mime_type; // trim encoding as it's invalid
-					} else {
-						cache_item->mime_encoding = encoding;
-						cache_item->is_binary = false;
-						if (strcmp(encoding, "utf-8") == 0) cache_item->is_utf8 = true;
-						else if (strcmp(encoding, "us-ascii") == 0)
-							cache_item->is_utf8 = true;
-					}
-				}
-			}
-		}
+	if (!detect_mime(file, file)) {
+		free(filepath);
+		free_value(file);
+		return cache_fatal_error;
 	}
 
-	if (!hashmap_set(cache_map, filepath, cache_item)) {
+	entry = hashmap_set(cache_map, filepath, file);
+	if (!entry) {
 		eprintf("Failed to set cache item\n");
 		free(filepath);
-		free_value(cache_item);
+		free_value(file);
 		return cache_fatal_error;
 	}
 
 	// TODO: read file into memory
-	file->cache = cache_item;
+	file_detail->cache = entry->value;
 	return cache_miss;
+}
+
+static bool detect_mime(struct file_cache_item *file, struct file_cache_item *entry) {
+	// determine the MIME type using libmagic
+	const char *mime = magic_buffer(magic_cookie, file->data, file->size);
+	if (!mime) {
+		eprintf("Failed to determine MIME type\n");
+		return false;
+	}
+
+	// find the MIME type by itself without the encoding
+	ASSERT(entry->mime_type = strdup(mime));
+
+	char *semicolon = strchr(entry->mime_type, ';');
+	if (semicolon) *semicolon = '\0'; // trim the semicolon and everything after it
+
+	// find the encoding by itself
+	const char *encoding;
+	ASSERTL(encoding = strchr(mime, ';'), mime);
+	ASSERTL(encoding = strchr(encoding + 1, '='), mime); // magic always returns "x/x; charset=x" for MAGIC_MIME
+	++encoding;
+	ASSERTL(*encoding != '\0', mime);
+	if (strcmp(encoding, "binary") == 0) {
+		entry->is_binary = true;
+		entry->is_utf8 = false;
+		encoding = "";
+	} else {
+		ASSERT(entry->mime_encoding = strdup(encoding)); // create another copy
+		encoding = entry->mime_encoding;
+		entry->is_binary = false;
+		// check if the encoding is UTF-8 or US-ASCII
+		if (strcmp(entry->mime_encoding, "utf-8") == 0)
+			entry->is_utf8 = true;
+		else if (strcmp(entry->mime_encoding, "us-ascii") == 0)
+			entry->is_utf8 = true;
+	}
+
+	// reconstruct the MIME type with the encoding
+	size_t len = strlen(entry->mime_type) + strlen(entry->mime_encoding) + 32;
+	entry->mime = malloc(len);
+	ASSERT(entry->mime);
+	ASSERTL(snprintf(entry->mime, len, "%s; charset=%s", entry->mime_type, entry->mime_encoding) >= 0, mime);
+	return true;
+error:
+	eprintf(ALLOC_ERROR);
+	return false;
+mime:
+	eprintf("Failed to determine MIME type\n");
+	return false;
 }

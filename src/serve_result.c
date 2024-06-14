@@ -17,7 +17,7 @@ enum serve_result serve_result(server_config cls, struct input_data *input, stru
 			char *status_name = status_codes[output->status];
 
 			char status_num_str[32];
-			snprintf(status_num_str, 32, "%i", output->status);
+			ASSERT(snprintf(status_num_str, 32, "%i", output->status) >= 0);
 
 			bool is_error = http_status_is_error(output->status);
 

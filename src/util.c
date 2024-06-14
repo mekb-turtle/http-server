@@ -3,6 +3,8 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include "macro.h"
+
 // for systems w/o GNU extensions
 char *strchrnul_(const char *s, int c) {
 	for (; *s && *s != c; s++)
@@ -90,7 +92,7 @@ char *WARN_UNUSED concat_expand_escape_func_n(
 				case ';':
 				case '\t': // tab
 					// escape characters as hexadecimal HTML entities
-					snprintf(hex, 16, "&#x%02x;", add[i]);
+					if (snprintf(hex, 16, "&#x%02x;", add[i]) < 0) return NULL;
 					escaped = hex;
 					break;
 			}

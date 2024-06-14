@@ -7,6 +7,8 @@
 #include "macro.h"
 
 static bool add_dir_item(struct response_type response_type, char **base, struct file_detail file, char *url, char *name, cJSON *dir_array, char *class, char *custom_type) {
+	char *size_format = NULL;
+
 	if (!custom_type) {
 		if (file.dir)
 			custom_type = "directory";
@@ -18,8 +20,9 @@ static bool add_dir_item(struct response_type response_type, char **base, struct
 
 	size_t size = get_file_size(file);
 	char size_str[32];
-	snprintf(size_str, 32, "%li", size);
-	char *size_format = format_bytes(size, binary_i);
+	ASSERT(snprintf(size_str, 32, "%li", size) >= 0);
+	size_format = format_bytes(size, binary_i);
+	ASSERT(size_format);
 
 	switch (response_type.type) {
 		case OUT_NONE:

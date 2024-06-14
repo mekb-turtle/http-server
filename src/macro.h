@@ -5,14 +5,24 @@
 #define WARN_UNUSED
 #endif
 #endif
+
 #ifndef eprintf
+#include <stdio.h>
 #define eprintf(...) fprintf(stderr, __VA_ARGS__)
 #endif
+
+#include <stdbool.h>
+extern bool _assert_internal(bool val, const char *expr);
+
 #ifndef ASSERT
 // ASSERT macro for error handling
-// I personally think this is cleaner, but if this is stupid, please let me know
-#define ASSERT(expr) \
-	if (!expr) goto error
+// I personally think this is cleaner
+// than writing if (!...) goto ... every time,
+// but if this is stupid, please let me know
+#define ASSERTL(expr, label) \
+	if (_assert_internal(!!(expr), #expr)) goto label // internal function so it's portable
+#define ASSERT(expr) ASSERTL(expr, error)
+
 // string concatenation macros with error handling
 // saves writing ASSERT(concat...(...)) over and over
 #define append_n(str, len) \

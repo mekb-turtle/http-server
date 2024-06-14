@@ -324,6 +324,9 @@ enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connecti
                                      const char *method, const char *version,
                                      const char *upload_data,
                                      size_t *upload_data_size, void **req_cls) {
+	// get server config data
+	server_config cls = (server_config) cls_;
+
 	struct output_data output = {
 	        .data = NULL,                                   // response data
 	        .data_memory = MHD_RESPMEM_PERSISTENT,          // what mhd should do with the data
@@ -349,9 +352,6 @@ enum MHD_Result answer_to_connection(void *cls_, struct MHD_Connection *connecti
 	}
 
 	bool not_found = false; // for custom 404 page
-
-	// get server config data
-	server_config cls = (server_config) cls_;
 
 	if (strcmp(method, MHD_HTTP_METHOD_GET) != 0) {
 		output.status = MHD_HTTP_METHOD_NOT_ALLOWED;

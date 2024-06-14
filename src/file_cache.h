@@ -6,9 +6,9 @@ struct file_cache_item {
 	void *data;
 	size_t size;
 	bool is_binary;
-	const char *mime;
+	char *mime;
 	char *mime_type;
-	const char *mime_encoding;
+	char *mime_encoding;
 	bool is_utf8;
 };
 enum cache_result {
