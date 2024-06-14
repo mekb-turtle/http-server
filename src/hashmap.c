@@ -7,7 +7,7 @@ struct hashmap WARN_UNUSED hashmap_create(size_t size,
 	// allocate memory for the map and initialize all buckets to NULL
 	struct hashmap map;
 	map.size = 0;
-	size_t total_size = size * sizeof(struct hashmap_entry *);
+	size_t total_size = size * sizeof(hashmap_entry);
 	map.buckets = malloc(total_size);
 	if (!map.buckets) return map;
 	for (size_t i = 0; i < size; i++) {
@@ -22,7 +22,7 @@ struct hashmap WARN_UNUSED hashmap_create(size_t size,
 	return map;
 }
 
-static void free_entry_kv(struct hashmap_entry *entry, struct hashmap *map) {
+static void free_entry_kv(hashmap_entry entry, struct hashmap *map) {
 	if (!entry) return;
 	// free key and value
 	if (entry->key && map->free_key) map->free_key(entry->key);
@@ -31,25 +31,31 @@ static void free_entry_kv(struct hashmap_entry *entry, struct hashmap *map) {
 	entry->value = NULL;
 }
 
-static void free_entry(struct hashmap_entry *entry, struct hashmap *map) {
+static void free_entry(hashmap_entry entry, struct hashmap *map) {
 	if (!entry) return;
 	free_entry_kv(entry, map);
 	// free the entry
 	free(entry);
 }
 
-void hashmap_free(struct hashmap *map) {
+void hashmap_clear(struct hashmap *map) {
 	if (!map) return;
 	if (!map->buckets) return;
 	// free all entries
 	for (size_t i = 0; i < map->size; i++) {
-		struct hashmap_entry *entry = map->buckets[i];
+		hashmap_entry entry = map->buckets[i];
 		while (entry) {
-			struct hashmap_entry *next = entry->next;
+			hashmap_entry next = entry->next;
 			free_entry(entry, map);
 			entry = next;
 		}
+		map->buckets[i] = NULL;
 	}
+}
+
+void hashmap_free(struct hashmap *map) {
+	if (!map) return;
+	hashmap_clear(map);
 	// free buckets
 	free(map->buckets);
 }
@@ -58,10 +64,10 @@ static size_t internal_get_bucket_index(struct hashmap *map, void *key) {
 	return map->hash_key(key) % map->size;
 }
 
-struct hashmap_entry *WARN_UNUSED hashmap_set(struct hashmap *map, void *key, void *value) {
+hashmap_entry WARN_UNUSED hashmap_set(struct hashmap *map, void *key, void *value) {
 	// get the bucket for the key, then iterate over the linked list to find the key
 	size_t bucket_index = internal_get_bucket_index(map, key);
-	struct hashmap_entry *entry = map->buckets[bucket_index];
+	hashmap_entry entry = map->buckets[bucket_index];
 	while (entry) {
 		if (map->compare_key(entry->key, key)) {
 			// free old key and value
@@ -76,7 +82,7 @@ struct hashmap_entry *WARN_UNUSED hashmap_set(struct hashmap *map, void *key, vo
 	}
 
 	// if the key was not found, create a new entry
-	struct hashmap_entry *new_entry = malloc(sizeof(struct hashmap_entry));
+	hashmap_entry new_entry = malloc(sizeof(struct hashmap_entry));
 	if (!new_entry) return NULL;
 	if (entry) {
 		// update the previous entry's next pointer
@@ -95,8 +101,8 @@ struct hashmap_entry *WARN_UNUSED hashmap_set(struct hashmap *map, void *key, vo
 bool hashmap_remove(struct hashmap *map, void *key) {
 	// get the bucket for the key, then iterate over the linked list to find the key
 	size_t bucket_index = internal_get_bucket_index(map, key);
-	struct hashmap_entry *head = map->buckets[bucket_index];
-	struct hashmap_entry *entry = head, *prev = head;
+	hashmap_entry head = map->buckets[bucket_index];
+	hashmap_entry entry = head, prev = head;
 	for (; entry; prev = entry, entry = entry->next) {
 		// if the key was found, remove the entry
 		if (map->compare_key(entry->key, key)) {
@@ -114,9 +120,9 @@ bool hashmap_remove(struct hashmap *map, void *key) {
 	return false;
 }
 
-struct hashmap_entry *WARN_UNUSED hashmap_get(struct hashmap *map, void *key) {
+hashmap_entry WARN_UNUSED hashmap_get(struct hashmap *map, void *key) {
 	// get the bucket for the key, then iterate over the linked list to find the key
-	struct hashmap_entry *entry = map->buckets[internal_get_bucket_index(map, key)];
+	hashmap_entry entry = map->buckets[internal_get_bucket_index(map, key)];
 	for (; entry; entry = entry->next) {
 		if (map->compare_key(entry->key, key)) return entry;
 	}
@@ -126,7 +132,7 @@ struct hashmap_entry *WARN_UNUSED hashmap_get(struct hashmap *map, void *key) {
 void hashmap_loop(struct hashmap *map, bool (*callback)(void *key, void *value)) {
 	// iterate over all buckets and entries, calling the callback for each entry
 	for (size_t i = 0; i < map->size; i++) {
-		struct hashmap_entry *entry = map->buckets[i];
+		hashmap_entry entry = map->buckets[i];
 		for (; entry; entry = entry->next) {
 			if (!callback(entry->key, entry->value)) return;
 		}

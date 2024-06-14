@@ -23,4 +23,5 @@ enum cache_result get_file_cached(
         struct file_detail *file,
         bool fetch_new);
 extern void free_file_cache(void);
+extern void flush_file_cache(void);
 #endif

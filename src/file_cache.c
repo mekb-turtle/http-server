@@ -31,11 +31,15 @@ static void free_value(void *value_) {
 	free(value);
 }
 
-static struct hashmap *cache_map = NULL;
+static volatile struct hashmap *cache_map = NULL;
 
 void free_file_cache(void) {
 	hashmap_free(cache_map);
 	cache_map = NULL;
+}
+
+void flush_file_cache(void) {
+	hashmap_clear(cache_map);
 }
 
 bool initialize_cache_map() {

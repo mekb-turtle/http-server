@@ -17,6 +17,10 @@
 static struct MHD_Daemon *httpd;
 static void signal_handler(int sig); // later in the code
 static void handle_exit();
+static void flush_file_cache_() {
+	printf("Flushing file cache...\n");
+	flush_file_cache();
+}
 
 static struct option options_getopt[] = {
         {"help",      no_argument,       0, 'h'},
@@ -63,6 +67,7 @@ int main(int argc, char *argv[]) {
 				printf("-d --directory: List directories\n");
 				printf("-F --no-footer: Don't show footer with server info\n");
 				printf("-n --notfound --404 [file]: Set what file to serve on 404\n");
+				printf("SIGUSR1 - Flush file cache\n");
 				return 0;
 			case 'V':
 				printf("%s %s\n", TARGET, VERSION);
@@ -227,7 +232,7 @@ int main(int argc, char *argv[]) {
 	        SIGVTALRM};
 	for (int i = 0; i < sizeof(signals) / sizeof(signals[0]); i++)
 		signal(signals[i], signal_handler);
-	signal(SIGUSR1, signal_handler); // TODO: make it clear cache safely
+	signal(SIGUSR1, flush_file_cache_);
 	signal(SIGUSR2, signal_handler);
 	while (true) pause();
 }
