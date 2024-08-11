@@ -3,26 +3,16 @@
 #include <stdlib.h>
 #include <string.h>
 #include "macro.h"
-#include "hashmap.h"
 #include "magic.h"
+
+#include "hashmap.h"
+#include "fnv1_32.h"
 
 #define eprintf(...) fprintf(stderr, __VA_ARGS__)
 
 // for hashmap functions
-static bool strcmp_compare(void *key1, void *key2) {
+static bool strcmp_compare(const void *key1, const void *key2) {
 	return strcmp(key1, key2) == 0;
-}
-static size_t fnv_1a_hash_n(const void *data, size_t len) {
-	// FNV-1a hash function
-	uint32_t hash = 0x811c9dc5;
-	for (size_t i = 0; i < len; i++) {
-		hash ^= ((char *) data)[i];
-		hash *= 0x01000193;
-	}
-	return hash;
-}
-static size_t fnv_1a_hash(void *data) {
-	return fnv_1a_hash_n(data, strlen(data));
 }
 static void free_value(void *value_) {
 	struct file_cache_item *value = (struct file_cache_item *) value_;
@@ -40,16 +30,18 @@ void free_file_cache(void) {
 	cache_map = NULL;
 }
 
+static size_t hash(const void *key) {
+	return fnv1a_32_hash(key);
+}
+
 bool initialize_cache_map() {
 	if (cache_map) return true;
 	// initialize the cache map
-	static struct hashmap cache_map_;
-	cache_map_ = hashmap_create(0x400, fnv_1a_hash, strcmp_compare, free, free_value);
-	if (!cache_map_.buckets) {
+	cache_map = hashmap_create(0x400, hash, strcmp_compare, malloc, free, free, free_value);
+	if (!cache_map) {
 		eprintf("Failed to create cache hashmap\n");
 		return false;
 	}
-	cache_map = &cache_map_;
 	return true;
 }
 

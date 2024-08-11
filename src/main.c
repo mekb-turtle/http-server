@@ -52,7 +52,7 @@ int main(int argc, char *argv[]) {
 	while ((opt = getopt_long(argc, argv, ":hVa:p:qfsdn:F", options_getopt, NULL)) != -1) {
 		switch (opt) {
 			case 'h':
-				printf("Usage: %s [option]... [directory/file]\n", TARGET);
+				printf("Usage: %s [option]... [directory/file]\n", PROJECT_NAME);
 				printf("-h --help: Shows help text\n");
 				printf("-V --version: Shows the version\n");
 				printf("-a --address [address]: Set the address to listen on\n");
@@ -65,7 +65,7 @@ int main(int argc, char *argv[]) {
 				printf("-n --notfound --404 [file]: Set what file to serve on 404\n");
 				return 0;
 			case 'V':
-				printf("%s %s\n", TARGET, VERSION);
+				printf("%s %s\n", PROJECT_NAME, PROJECT_VERSION);
 				return 0;
 			default:
 				if (!invalid) {

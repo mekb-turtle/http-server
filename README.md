@@ -12,8 +12,9 @@ Simple HTTP server that serves files from a directory. It is written in C using 
     - libmagic (arch: `file`, debian: `libmagic-dev`)
     -     sudo pacman -S libmicrohttpd cjson file
     -     sudo apt install libmicrohttpd-dev libcjson-dev libmagic-dev
-2. Run `make`
-3. Binary will be created in `build/*/bin/`
+2. Run `meson setup build`
+3. Run `meson compile -C build`
+4. Binary will be created at `build/http-server`
 
 The server supports directory listing and file preview.
 

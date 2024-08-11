@@ -217,8 +217,8 @@ error:
 	return false;
 }
 
-extern const char binary_site_css[];
-extern size_t binary_site_css_len;
+extern const char ___src_site_css[];
+extern size_t ___src_site_css_len;
 
 // TODO: use a template engine for this
 
@@ -232,7 +232,7 @@ bool WARN_UNUSED construct_html_head(server_config cls, struct input_data *input
 	       "<meta charset=\"utf-8\">"
 	       "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
 	append("<style>");
-	append_n(binary_site_css, binary_site_css_len);
+	append_n(___src_site_css, ___src_site_css_len);
 	append("</style>");
 	return true;
 error:
@@ -272,11 +272,11 @@ bool WARN_UNUSED construct_html_end(server_config cls, struct input_data *input,
 	append("\n</div>");
 	if (cls->show_footer) {
 		append("<footer><p>Running <a href=\"");
-		append_escape(URL);
+		append_escape(PROJECT_URL);
 		append("\">");
-		append_escape(TARGET);
+		append_escape(PROJECT_NAME);
 		append("</a> ");
-		append_escape(VERSION);
+		append_escape(PROJECT_VERSION);
 		append("</p></footer>");
 	}
 	append("</body></html>");
@@ -290,18 +290,18 @@ bool WARN_UNUSED append_text_footer(server_config cls, struct output_data *outpu
 	switch (output->response_type.type) {
 		case OUT_TEXT:
 			append("\nRunning ");
-			append_escape(TARGET);
+			append_escape(PROJECT_NAME);
 			append(" ");
-			append_escape(VERSION);
+			append_escape(PROJECT_VERSION);
 			append("\n");
 			break;
 		case OUT_JSON:;
 			// add footer object to JSON
 			cJSON *running = cJSON_CreateObject();
 			ASSERT(running);
-			ASSERT(cJSON_AddStringToObject(running, "name", TARGET));
-			ASSERT(cJSON_AddStringToObject(running, "version", VERSION));
-			ASSERT(cJSON_AddStringToObject(running, "url", URL));
+			ASSERT(cJSON_AddStringToObject(running, "name", PROJECT_NAME));
+			ASSERT(cJSON_AddStringToObject(running, "version", PROJECT_VERSION));
+			ASSERT(cJSON_AddStringToObject(running, "url", PROJECT_URL));
 			ASSERT(cJSON_AddItemToObject(output->json_root, "running", running));
 			break;
 		default:
