@@ -7,11 +7,11 @@ Simple HTTP server that serves files from a directory. It is written in C using 
 #### Compiling:
 
 1. Install dependencies
-    - libmicrohttpd (arch: `libmicrohttpd`, debian: `libmicrohttpd-dev`)
-    - cJSON (arch: `cjson`, debian: `libcjson-dev`)
-    - libmagic (arch: `file`, debian: `libmagic-dev`)
-    -     sudo pacman -S libmicrohttpd cjson file
-    -     sudo apt install libmicrohttpd-dev libcjson-dev libmagic-dev
+    - [libmicrohttpd](https://www.gnu.org/software/libmicrohttpd/) (arch: `libmicrohttpd`, debian: `libmicrohttpd-dev`)
+    - [cJSON](https://github.com/DaveGamble/cJSON) (arch: `cjson`, debian: `libcjson-dev`)
+    - [libmagic](https://www.darwinsys.com/file/) (arch: `file`, debian: `libmagic-dev`)
+    - ```sudo pacman -S libmicrohttpd cjson file```
+    - ```sudo apt install libmicrohttpd-dev libcjson-dev libmagic-dev```
 2. Run `meson setup build`
 3. Run `meson compile -C build`
 4. Binary will be created at `build/http-server`
