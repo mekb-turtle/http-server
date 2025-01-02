@@ -43,8 +43,9 @@ The server supports directory listing and file preview.
 - [x] Directory listing
 - [ ] File preview
   - [x] Text
+    - [ ] Markdown rendering
     - [ ] Convert non-UTF8 text to UTF8
-    - [ ] Line numbers
+    - [x] Line numbers
     - [ ] Syntax highlighting
   - [ ] Images
   - [ ] Audio

@@ -217,8 +217,8 @@ error:
 	return false;
 }
 
-extern const char ___src_site_css[];
-extern size_t ___src_site_css_len;
+extern const char site_css[];
+extern size_t site_css_len;
 
 // TODO: use a template engine for this
 
@@ -232,7 +232,7 @@ bool WARN_UNUSED construct_html_head(server_config cls, struct input_data *input
 	       "<meta charset=\"utf-8\">"
 	       "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
 	append("<style>");
-	append_n(___src_site_css, ___src_site_css_len);
+	append_n(site_css, site_css_len);
 	append("</style>");
 	return true;
 error:
